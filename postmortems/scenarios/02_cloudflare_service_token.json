@@ -1,0 +1,74 @@
+{
+  "id": "cloudflare-service-token-2023",
+  "name": "Cloudflare — Service token code release took down Workers + Zero Trust + CDN",
+  "source": "https://blog.cloudflare.com/cloudflare-incident-on-january-24th-2023/",
+  "problem_id": "P-CF001",
+  "problem_title": "Workers platform unavailable — service token management failure after release",
+  "expected": {
+    "root_cause_keywords": ["deploy", "release", "token", "auth", "workers", "rollback"],
+    "action": "rollback",
+    "should_rollback": true,
+    "notes": "Code release in service-token-manager introduced an error. Rollback resolved it in 121 minutes total."
+  },
+  "mock_problem": {
+    "problem_id": "P-CF001",
+    "title": "Workers platform unavailable — service token management failure after release",
+    "severity": "AVAILABILITY",
+    "status": "OPEN",
+    "start_time": "2023-01-24T06:33:00Z",
+    "affected_entities": [
+      {"id": "SERVICE-001", "name": "service-token-manager"},
+      {"id": "SERVICE-002", "name": "workers-runtime"},
+      {"id": "SERVICE-003", "name": "zero-trust-gateway"},
+      {"id": "SERVICE-004", "name": "cdn-control-plane"}
+    ],
+    "root_cause_entity": "service-token-manager",
+    "evidence": [
+      {"type": "METRIC_EVENT", "details": "Workers execution rate: 100% → 0% over 8 minutes"},
+      {"type": "METRIC_EVENT", "details": "Auth service token validation failures: spiking to 100%"},
+      {"type": "LOG_EVENT",    "details": "service token not found in registry — 401 Unauthorized"}
+    ]
+  },
+  "mock_metrics": {
+    "metric": "workers_execution_rate_pct",
+    "values": [99, 99, 100, 98, 72, 34, 8, 1, 0, 0, 0, 0],
+    "timestamps_relative_minutes": [90, 80, 70, 60, 50, 45, 40, 38, 35, 25, 15, 5],
+    "auth_failure_rate_pct": [0, 0, 0, 0, 31, 68, 91, 98, 100, 100, 100, 100]
+  },
+  "mock_logs": {
+    "service": "service-token-manager",
+    "log_count": 7,
+    "entries": [
+      {"timestamp": "2023-01-24T06:30:00Z", "level": "INFO",  "message": "service-token-manager v9.1.0 deployed — token registry refactor"},
+      {"timestamp": "2023-01-24T06:33:00Z", "level": "ERROR", "message": "token lookup failed: registry key format mismatch after migration — token not found"},
+      {"timestamp": "2023-01-24T06:34:00Z", "level": "ERROR", "message": "workers-runtime: 401 Unauthorized — no valid service token returned"},
+      {"timestamp": "2023-01-24T06:35:00Z", "level": "ERROR", "message": "zero-trust-gateway: auth handshake failed — service token validation error"},
+      {"timestamp": "2023-01-24T06:36:00Z", "level": "ERROR", "message": "cdn-control-plane: unable to authenticate with origin — token service returning 401"},
+      {"timestamp": "2023-01-24T06:40:00Z", "level": "ERROR", "message": "workers execution rate at 0% — all worker invocations failing auth"},
+      {"timestamp": "2023-01-24T06:45:00Z", "level": "ERROR", "message": "customer impact: Workers, Zero Trust, CDN control plane all degraded — widespread 530 errors"}
+    ]
+  },
+  "mock_deployments": {
+    "project_id": "cloudflare/service-token-manager",
+    "deployments": [
+      {
+        "id": 44201,
+        "version": "v9.1.0",
+        "status": "success",
+        "deployed_at": "2023-01-24T06:30:00Z",
+        "deployed_by": "release-bot",
+        "commit_message": "refactor: token registry lookup to use new key schema for multi-region support",
+        "duration_seconds": 187
+      },
+      {
+        "id": 44200,
+        "version": "v9.0.8",
+        "status": "success",
+        "deployed_at": "2023-01-23T11:00:00Z",
+        "deployed_by": "release-bot",
+        "commit_message": "fix: token expiry edge case in Pacific region",
+        "duration_seconds": 162
+      }
+    ]
+  }
+}

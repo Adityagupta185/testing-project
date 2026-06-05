@@ -1,0 +1,35 @@
+# Secrets and credentials — never commit
+.env
+.env.*
+!.env.example
+*key.json
+key.json
+*.pem
+*.key
+*token*.txt
+credentials.json
+service-account*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.pytest_cache/
+
+# Node / frontend
+node_modules/
+dist/
+build/
+npm-debug.log*
+
+# Benchmark output (regenerable)
+postmortems/results/
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log

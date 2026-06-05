@@ -1,0 +1,73 @@
+{
+  "id": "circleci-postgres-schema-2021",
+  "name": "CircleCI — PostgreSQL field type change broke job distribution",
+  "source": "https://discuss.circleci.com/t/incident-report-november-8-2021-jobs-stuck-in-a-not-running-state/41890",
+  "problem_id": "P-CCI001",
+  "problem_title": "Jobs stuck in not-running state — job distributor stopped scanning",
+  "expected": {
+    "root_cause_keywords": ["deploy", "schema", "database", "field type", "validation", "distributor"],
+    "action": "rollback",
+    "should_rollback": true,
+    "notes": "Rollback was complex in reality (caused unreadable rows), but initial recommendation should be rollback"
+  },
+  "mock_problem": {
+    "problem_id": "P-CCI001",
+    "title": "Jobs stuck in not-running state — job distributor stopped scanning",
+    "severity": "AVAILABILITY",
+    "status": "OPEN",
+    "start_time": "2021-11-08T14:30:00Z",
+    "affected_entities": [
+      {"id": "SERVICE-001", "name": "job-distributor"},
+      {"id": "SERVICE-002", "name": "build-queue"}
+    ],
+    "root_cause_entity": "job-distributor",
+    "evidence": [
+      {"type": "METRIC_EVENT", "details": "Job distribution rate dropped from 520/min to 0"},
+      {"type": "METRIC_EVENT", "details": "Build queue depth growing: 1,400 jobs stuck"},
+      {"type": "LOG_EVENT", "details": "PostgreSQL strict schema validation failed on row scan"}
+    ]
+  },
+  "mock_metrics": {
+    "metric": "job_distribution_rate",
+    "values": [521, 518, 515, 503, 490, 12, 0, 0, 0, 0, 0, 0],
+    "timestamps_relative_minutes": [60, 55, 50, 45, 40, 35, 30, 25, 20, 15, 10, 5],
+    "queue_depth": [10, 12, 15, 18, 80, 320, 680, 1020, 1240, 1380, 1400, 1410]
+  },
+  "mock_logs": {
+    "service": "job-distributor",
+    "log_count": 8,
+    "entries": [
+      {"timestamp": "2021-11-08T14:28:00Z", "level": "INFO",  "message": "job-distributor v4.2.0 → v4.2.1 deployed, restarting"},
+      {"timestamp": "2021-11-08T14:29:00Z", "level": "ERROR", "message": "schema validation failed: field 'job_type' expected integer got text on row scan"},
+      {"timestamp": "2021-11-08T14:29:30Z", "level": "ERROR", "message": "PostgreSQL type mismatch: column job_type is type integer but expression is type text"},
+      {"timestamp": "2021-11-08T14:30:00Z", "level": "ERROR", "message": "distributor scan loop stopped: unrecoverable schema error — no jobs will be distributed"},
+      {"timestamp": "2021-11-08T14:32:00Z", "level": "WARN",  "message": "build queue depth: 320 jobs pending, 0 being distributed"},
+      {"timestamp": "2021-11-08T14:40:00Z", "level": "ERROR", "message": "build queue depth: 1,020 jobs pending — SLA breach imminent"},
+      {"timestamp": "2021-11-08T14:45:00Z", "level": "ERROR", "message": "customer escalations: builds not starting across all orgs"},
+      {"timestamp": "2021-11-08T14:50:00Z", "level": "ERROR", "message": "build queue depth: 1,400 jobs — all job classes affected"}
+    ]
+  },
+  "mock_deployments": {
+    "project_id": "circleci/job-distributor",
+    "deployments": [
+      {
+        "id": 9821,
+        "version": "v4.2.1",
+        "status": "success",
+        "deployed_at": "2021-11-08T14:28:00Z",
+        "deployed_by": "ci-bot",
+        "commit_message": "feat: migrate job_type column from text to integer for perf improvement",
+        "duration_seconds": 94
+      },
+      {
+        "id": 9820,
+        "version": "v4.2.0",
+        "status": "success",
+        "deployed_at": "2021-11-07T09:15:00Z",
+        "deployed_by": "ci-bot",
+        "commit_message": "fix: retry logic for flaky workers",
+        "duration_seconds": 88
+      }
+    ]
+  }
+}

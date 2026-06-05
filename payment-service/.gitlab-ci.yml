@@ -1,0 +1,60 @@
+stages:
+  - build
+  - deploy
+  - rollback
+
+variables:
+  IMAGE_NAME: gcr.io/$GCP_PROJECT_ID/payment-service
+  REGION: us-central1
+  SERVICE_NAME: payment-service
+
+# ── Build ────────────────────────────────────────────────────────────────────
+build:
+  stage: build
+  image: docker:24
+  services:
+    - docker:24-dind
+  script:
+    - echo "$GCP_SA_KEY" | docker login -u _json_key --password-stdin https://gcr.io
+    - docker build -t $IMAGE_NAME:$CI_COMMIT_TAG -t $IMAGE_NAME:latest .
+    - docker push $IMAGE_NAME:$CI_COMMIT_TAG
+    - docker push $IMAGE_NAME:latest
+  only:
+    - tags
+
+# ── Deploy ───────────────────────────────────────────────────────────────────
+deploy:
+  stage: deploy
+  image: google/cloud-sdk:alpine
+  script:
+    - echo "$GCP_SA_KEY" | gcloud auth activate-service-account --key-file=-
+    - gcloud config set project $GCP_PROJECT_ID
+    - |
+      gcloud run deploy $SERVICE_NAME \
+        --image $IMAGE_NAME:$CI_COMMIT_TAG \
+        --region $REGION \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars APP_VERSION=$CI_COMMIT_TAG
+    - echo "Deployed $CI_COMMIT_TAG to Cloud Run"
+  only:
+    - tags
+
+# ── Rollback (triggered manually by SRE Copilot agent) ───────────────────────
+rollback:
+  stage: rollback
+  image: google/cloud-sdk:alpine
+  script:
+    - echo "$GCP_SA_KEY" | gcloud auth activate-service-account --key-file=-
+    - gcloud config set project $GCP_PROJECT_ID
+    - |
+      gcloud run deploy $SERVICE_NAME \
+        --image $IMAGE_NAME:${ROLLBACK_VERSION:-v2.3.0} \
+        --region $REGION \
+        --platform managed \
+        --allow-unauthenticated \
+        --set-env-vars APP_VERSION=${ROLLBACK_VERSION:-v2.3.0}
+    - echo "Rolled back to ${ROLLBACK_VERSION:-v2.3.0}"
+  when: manual
+  environment:
+    name: production

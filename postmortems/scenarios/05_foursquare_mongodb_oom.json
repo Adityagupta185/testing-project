@@ -1,0 +1,76 @@
+{
+  "id": "foursquare-mongodb-oom-2010",
+  "name": "Foursquare — MongoDB OOM under heavy reads (NO recent deploy — capacity issue)",
+  "source": "https://groups.google.com/g/mongodb-user/c/UoqU8ofp134",
+  "problem_id": "P-FS001",
+  "problem_title": "MongoDB out of memory — storage service degraded under sustained read load",
+  "expected": {
+    "root_cause_keywords": ["memory", "mongodb", "database", "capacity", "load", "query", "oom"],
+    "action": "scale_or_optimize",
+    "should_rollback": false,
+    "notes": "NO deploy triggered this. Load pattern changed. Agent should NOT recommend rollback — should recommend DB scaling or query optimization."
+  },
+  "mock_problem": {
+    "problem_id": "P-FS001",
+    "title": "MongoDB out of memory — storage service degraded under sustained read load",
+    "severity": "PERFORMANCE",
+    "status": "OPEN",
+    "start_time": "2010-10-04T18:00:00Z",
+    "affected_entities": [
+      {"id": "SERVICE-001", "name": "mongodb-primary"},
+      {"id": "SERVICE-002", "name": "location-service"},
+      {"id": "SERVICE-003", "name": "checkin-api"}
+    ],
+    "root_cause_entity": "mongodb-primary",
+    "evidence": [
+      {"type": "METRIC_EVENT", "details": "MongoDB memory utilisation: 68% → 98% over 4 hours under growing read traffic"},
+      {"type": "METRIC_EVENT", "details": "Query latency: 45ms → 8,400ms p95 — extreme page fault thrashing"},
+      {"type": "LOG_EVENT",    "details": "OOM killer invoked — mongod process killed, page faults: 12,000/sec"}
+    ]
+  },
+  "mock_metrics": {
+    "metric": "mongodb_memory_used_pct",
+    "values": [68, 71, 74, 78, 82, 87, 91, 94, 96, 97, 98, 98],
+    "timestamps_relative_minutes": [240, 210, 180, 150, 120, 90, 60, 45, 30, 20, 10, 5],
+    "query_latency_ms_p95": [45, 48, 52, 70, 140, 380, 1200, 3100, 6200, 7800, 8400, 8600],
+    "page_faults_per_sec": [12, 15, 20, 45, 120, 480, 2100, 6800, 10200, 11800, 12000, 12100]
+  },
+  "mock_logs": {
+    "service": "mongodb-primary",
+    "log_count": 9,
+    "entries": [
+      {"timestamp": "2010-10-04T14:00:00Z", "level": "INFO",  "message": "MongoDB 1.6.2 running normally — memory 68%, all reads served from cache"},
+      {"timestamp": "2010-10-04T15:30:00Z", "level": "WARN",  "message": "page fault rate increasing: 480/sec — working set may be exceeding available RAM"},
+      {"timestamp": "2010-10-04T16:30:00Z", "level": "WARN",  "message": "WARNING: slow query 1,243ms — db.checkins.find({loc: {$near: ...}}) — missing geo index selectivity"},
+      {"timestamp": "2010-10-04T17:00:00Z", "level": "ERROR", "message": "page faults: 6,800/sec — thrashing: reads requiring disk I/O, cache eviction storm"},
+      {"timestamp": "2010-10-04T17:30:00Z", "level": "ERROR", "message": "query latency p95 6,200ms — checkin-api request timeouts increasing"},
+      {"timestamp": "2010-10-04T17:45:00Z", "level": "ERROR", "message": "mongod: virtual memory 99% — approaching OOM threshold"},
+      {"timestamp": "2010-10-04T17:55:00Z", "level": "ERROR", "message": "kernel OOM killer: killed mongod pid 1842 — out of memory"},
+      {"timestamp": "2010-10-04T17:56:00Z", "level": "ERROR", "message": "MongoDB restarting — all in-flight queries dropped, users experiencing total outage"},
+      {"timestamp": "2010-10-04T18:00:00Z", "level": "ERROR", "message": "location-service: database unavailable — check-in API down for all users"}
+    ]
+  },
+  "mock_deployments": {
+    "project_id": "foursquare/backend",
+    "deployments": [
+      {
+        "id": 3301,
+        "version": "v1.8.4",
+        "status": "success",
+        "deployed_at": "2010-10-01T09:00:00Z",
+        "deployed_by": "engineering",
+        "commit_message": "feat: new check-in feed UI — backend unchanged",
+        "duration_seconds": 210
+      },
+      {
+        "id": 3300,
+        "version": "v1.8.3",
+        "status": "success",
+        "deployed_at": "2010-09-29T11:00:00Z",
+        "deployed_by": "engineering",
+        "commit_message": "fix: notification delivery retry",
+        "duration_seconds": 198
+      }
+    ]
+  }
+}

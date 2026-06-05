@@ -1,0 +1,74 @@
+{
+  "id": "rustlang-crates-url-2023",
+  "name": "rust-lang crates.io — Deploy broke download URL generation (3.7M failed requests)",
+  "source": "https://blog.rust-lang.org/inside-rust/2023/07/21/crates-io-postmortem.html",
+  "problem_id": "P-RS001",
+  "problem_title": "All crate downloads failing — 404 on static.crates.io after infrastructure deploy",
+  "expected": {
+    "root_cause_keywords": ["deploy", "url", "404", "download", "generation", "rollback"],
+    "action": "rollback",
+    "should_rollback": true,
+    "notes": "Deployment bug in download URL generation. 3.7M failed requests in 13 minutes. Rollback fixed it."
+  },
+  "mock_problem": {
+    "problem_id": "P-RS001",
+    "title": "All crate downloads failing — 404 on static.crates.io after infrastructure deploy",
+    "severity": "AVAILABILITY",
+    "status": "OPEN",
+    "start_time": "2023-07-20T12:17:00Z",
+    "affected_entities": [
+      {"id": "SERVICE-001", "name": "crates-io-api"},
+      {"id": "SERVICE-002", "name": "static-file-server"},
+      {"id": "SERVICE-003", "name": "cdn-origin"}
+    ],
+    "root_cause_entity": "crates-io-api",
+    "evidence": [
+      {"type": "METRIC_EVENT", "details": "Download error rate: 0% → 100% within 1 minute of deploy"},
+      {"type": "METRIC_EVENT", "details": "Request rate: 4,710 req/s all returning 404"},
+      {"type": "LOG_EVENT",    "details": "URL generation: invalid path prefix in download URL — static.crates.io returning 404"}
+    ]
+  },
+  "mock_metrics": {
+    "metric": "download_success_rate_pct",
+    "values": [100, 100, 100, 100, 100, 100, 0, 0, 0, 0, 0, 0],
+    "timestamps_relative_minutes": [30, 25, 20, 18, 16, 15, 14, 12, 10, 8, 5, 2],
+    "requests_per_second": [4710, 4720, 4690, 4700, 4715, 4708, 4720, 4711, 4698, 4715, 4710, 4705],
+    "cdn_404_rate_pct": [0, 0, 0, 0, 0, 0, 100, 100, 100, 100, 100, 100]
+  },
+  "mock_logs": {
+    "service": "crates-io-api",
+    "log_count": 7,
+    "entries": [
+      {"timestamp": "2023-07-20T12:15:00Z", "level": "INFO",  "message": "crates.io infra deploy v2023.07.20 — DNS record recreation + certificate rotation"},
+      {"timestamp": "2023-07-20T12:17:00Z", "level": "ERROR", "message": "404 Not Found — GET https://static.crates.io/crates/serde/1.0.171/download"},
+      {"timestamp": "2023-07-20T12:17:05Z", "level": "ERROR", "message": "URL generation: path prefix mismatch — generated '/crates/' expected '/crates-io-cdn/'"},
+      {"timestamp": "2023-07-20T12:17:10Z", "level": "ERROR", "message": "CDN origin: all asset requests returning 404 — path not found after DNS record recreation"},
+      {"timestamp": "2023-07-20T12:17:30Z", "level": "ERROR", "message": "cargo client retrying: 4 attempts, all 404 — crate download completely broken"},
+      {"timestamp": "2023-07-20T12:20:00Z", "level": "ERROR", "message": "estimated 890K failed download requests in last 3 minutes at 4,710 req/s"},
+      {"timestamp": "2023-07-20T12:25:00Z", "level": "ERROR", "message": "ALL crate downloads broken — Rust ecosystem build pipelines failing globally"}
+    ]
+  },
+  "mock_deployments": {
+    "project_id": "rust-lang/crates.io",
+    "deployments": [
+      {
+        "id": 5521,
+        "version": "v2023.07.20",
+        "status": "success",
+        "deployed_at": "2023-07-20T12:15:00Z",
+        "deployed_by": "infra-team",
+        "commit_message": "infra: recreate DNS records and TLS certificates for static.crates.io — CDN migration",
+        "duration_seconds": 120
+      },
+      {
+        "id": 5520,
+        "version": "v2023.07.18",
+        "status": "success",
+        "deployed_at": "2023-07-18T08:00:00Z",
+        "deployed_by": "infra-team",
+        "commit_message": "chore: dependency updates",
+        "duration_seconds": 98
+      }
+    ]
+  }
+}
