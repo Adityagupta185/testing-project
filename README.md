@@ -1,4 +1,4 @@
-# <img width="100" src="https://github.com/user-attachments/assets/f27e7a36-4e21-4760-8d2c-4a3a1bce734f" /> SPARK — Autonomous SRE Incident Response Agent <img width="100" src="https://github.com/user-attachments/assets/f27e7a36-4e21-4760-8d2c-4a3a1bce734f" />
+# <img width="100" src="https://github.com/user-attachments/assets/f27e7a36-4e21-4760-8d2c-4a3a1bce734f" /> SPARK — Autonomous SRE Incident Response Agent
 
 
 SPARK turns a production alert into a diagnosed root cause and a one-click remediation. When Dynatrace detects a problem, an AI agent built on Google Cloud investigates the live telemetry, identifies the root cause, proposes a fix, and — after a human approves — executes a rollback through GitLab.
