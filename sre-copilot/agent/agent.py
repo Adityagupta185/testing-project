@@ -162,7 +162,7 @@ def investigate_incident(problem_id: str, problem_title: str, credentials: dict 
             os.environ["APPROVAL_WEBHOOK_URL"] = credentials["approval_url"]
             APPROVAL_WEBHOOK_URL = credentials["approval_url"]
 
-    session = _session_service.create_session(app_name="spark_ai", user_id="sre-oncall")
+    session = _session_service.create_session_sync(app_name="spark_ai", user_id="sre-oncall")
 
     message = (
         f"INCIDENT ALERT\n"

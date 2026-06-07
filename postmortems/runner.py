@@ -13,6 +13,13 @@ import os, sys, json, time, argparse, textwrap
 from pathlib import Path
 from datetime import datetime, timezone
 
+# Windows consoles default to cp1252 and choke on ✓/✗/→ — force UTF-8 output.
+try:
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+except Exception:
+    pass
+
 # -- Load .env from sre-copilot ------------------------------------------------
 env_path = Path(__file__).parent.parent / "sre-copilot" / ".env"
 if env_path.exists():

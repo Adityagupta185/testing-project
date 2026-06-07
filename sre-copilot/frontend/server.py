@@ -453,6 +453,8 @@ def create_incident():
         inc = incidents[pre_id]
         inc.update({k: v for k, v in data.items() if k != "incident_id"})
         inc["status"] = "awaiting_decision"
+        if inc.get("root_cause") and not inc.get("slack_sent"):
+            threading.Thread(target=_notify_slack, args=(pre_id,), daemon=True).start()
         return jsonify({"incident_id": pre_id}), 200
 
     incident_id = str(uuid.uuid4())[:8]
@@ -465,6 +467,10 @@ def create_incident():
         "steps":       [],
         **data,
     }
+    # Real agent (ApprovalClient) posts the briefing here — notify Slack just like
+    # the Simulate path does, so the live-agent flow also reaches the engineer's Slack.
+    if incidents[incident_id].get("root_cause"):
+        threading.Thread(target=_notify_slack, args=(incident_id,), daemon=True).start()
     return jsonify({"incident_id": incident_id}), 201
 
 

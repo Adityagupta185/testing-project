@@ -24,12 +24,17 @@ class GitLabClient:
 
     def get_deployments(self, project_id: str, hours_back: int = 3) -> dict:
         since = (datetime.now(timezone.utc) - timedelta(hours=hours_back)).isoformat()
-        pipelines = self._get(f"projects/{project_id}/pipelines", {
-            "updated_after": since,
-            "order_by": "updated_at",
-            "sort": "desc",
-            "per_page": 10
-        })
+        try:
+            pipelines = self._get(f"projects/{project_id}/pipelines", {
+                "updated_after": since,
+                "order_by": "updated_at",
+                "sort": "desc",
+                "per_page": 10
+            })
+        except Exception as e:
+            # Don't let a GitLab hiccup crash the whole investigation
+            return {"project_id": project_id, "hours_back": hours_back,
+                    "deployment_count": 0, "deployments": [], "error": str(e)[:200]}
         deployments = []
         for p in pipelines:
             deployments.append({
@@ -49,18 +54,28 @@ class GitLabClient:
         }
 
     def trigger_rollback(self, project_id: str, rollback_to_version: str) -> dict:
-        """Trigger the manual rollback job via pipeline variable."""
-        result = self._post(f"projects/{project_id}/pipeline", {
-            "ref": "master",
-            "variables": [
-                {"key": "ROLLBACK_VERSION", "value": rollback_to_version},
-                {"key": "TRIGGERED_BY", "value": "sre-copilot-agent"}
-            ]
-        })
-        return {
-            "triggered": True,
-            "pipeline_id": result.get("id"),
-            "status": result.get("status"),
-            "web_url": result.get("web_url"),
-            "rollback_to": rollback_to_version
-        }
+        """Trigger the GitLab rollback pipeline (returns gracefully on failure)."""
+        try:
+            result = self._post(f"projects/{project_id}/pipeline", {
+                "ref": "master",
+                "variables": [
+                    {"key": "ROLLBACK_VERSION", "value": rollback_to_version},
+                    {"key": "TRIGGERED_BY", "value": "sre-copilot-agent"}
+                ]
+            })
+            return {
+                "triggered": True,
+                "pipeline_id": result.get("id"),
+                "status": result.get("status"),
+                "web_url": result.get("web_url"),
+                "rollback_to": rollback_to_version
+            }
+        except Exception as e:
+            # The rollback job is `when: manual` in .gitlab-ci.yml by design —
+            # surface that to the agent instead of crashing the run.
+            return {
+                "triggered": False,
+                "rollback_to": rollback_to_version,
+                "error": str(e)[:200],
+                "note": "Rollback pipeline is manual-approval gated in GitLab; engineer triggers the rollback job.",
+            }
