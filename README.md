@@ -5,6 +5,8 @@ SPARK turns a production alert into a diagnosed root cause and a one-click remed
 
 **Track:** Dynatrace · **Built with:** Google Cloud (Vertex AI Gemini, Agent Development Kit, Cloud Run)
 
+**Live:** [spark-366154347729.us-central1.run.app](https://spark-366154347729.us-central1.run.app) — click **Live Demo** to watch the full detect → diagnose → approve → rollback flow in ~30 seconds, no account required.
+
 ---
 
 ## The Problem
@@ -20,13 +22,22 @@ Dynatrace alert
            - reads the Dynatrace problem, metrics, and logs
            - reviews recent GitLab deployments
            - determines root cause and whether a rollback is warranted
-      -> Approval UI: root cause, evidence, and recommended action
-   -> Engineer approves
+      -> Approval request: root cause, evidence, and recommended action
+           - pushed to Slack and shown on the dashboard
+   -> Engineer approves (one tap in Slack, or on the dashboard)
       -> GitLab pipeline executes the rollback
       -> Incident marked resolved
 ```
 
 The agent does not blindly act. It distinguishes incidents that a rollback will fix (a bad deploy) from those it will not (a resource leak with no preceding deploy), and recommends accordingly.
+
+## Onboarding & Approvals
+
+SPARK is multi-tenant: a user connects their own stack through a short wizard — **Dynatrace** (API token or OAuth2), **GitLab** (project + token), and **Slack** (one-click *Add to Slack*, or a bot token). Each session is isolated, so incidents and notifications are scoped to the tenant that created them.
+
+- **Slack-in-the-loop.** When the agent reaches a diagnosis, an approval card is posted to the tenant's own Slack channel. Approve or reject from Slack and the rollback executes automatically — the same decision is mirrored on the dashboard.
+- **Credentials stay protected.** Tokens are never returned to the browser; Slack OAuth keeps the bot token server-side behind an opaque handle. Session tokens are encrypted at rest (Fernet), with optional Firestore persistence.
+- **No-account demo.** A sandbox session (`/demo`) runs the entire flow end-to-end without any credentials, for evaluation.
 
 ## Architecture
 
@@ -37,6 +48,7 @@ The agent does not blindly act. It distinguishes incidents that a rollback will 
 | Remediation | `agent/tools/gitlab_client.py` | GitLab API — deployment history, pipeline rollback |
 | Ingress | `webhook/` | Cloud Run service receiving Dynatrace alerts |
 | Interface | `frontend/` | React approval dashboard + Flask backend (`server.py`) |
+| Notifications | `frontend/server.py` | Slack approval cards — *Add to Slack* OAuth or bot token, per tenant |
 | Demo target | `payment-service/` | Flask payment API with a seeded memory-leak fault |
 | Evaluation | `postmortems/` | Benchmark of the agent against real production post-mortems |
 
@@ -116,9 +128,10 @@ The hardest scenario models a database out-of-memory failure with no preceding d
 
 ## Technologies Used
 
-- **Google Cloud:** Vertex AI (Gemini 2.5 Flash), Agent Development Kit (ADK), Cloud Run
+- **Google Cloud:** Vertex AI (Gemini 2.5 Flash), Agent Development Kit (ADK), Cloud Run, Firestore (optional session store)
 - **Dynatrace (partner):** problem, metrics, and log APIs via the partner integration
 - **GitLab:** deployment history and CI/CD pipeline-driven rollback
+- **Slack:** OAuth (*Add to Slack*) and Block Kit approval cards for human-in-the-loop sign-off
 - **Application:** Python (Flask), React
 
 ## Findings and Learnings
