@@ -8,6 +8,7 @@ SPARK — AI incident response agent backend.
 """
 
 import os
+import re
 import uuid
 import time
 import hmac
@@ -16,7 +17,8 @@ import logging
 import threading
 import requests
 from datetime import datetime, timezone
-from flask import Flask, request, jsonify, send_from_directory
+from urllib.parse import urlencode
+from flask import Flask, request, jsonify, send_from_directory, redirect
 from flask_cors import CORS
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
@@ -26,13 +28,121 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-sessions: dict = {}
-incidents: dict = {}
+
+# ─── Token encryption + session persistence ──────────────────────────────────
+# Tokens (Dynatrace, GitLab, Slack) are encrypted at rest with Fernet when
+# SESSION_ENC_KEY is set. Sessions are stored in Firestore when
+# FIRESTORE_SESSIONS=1, otherwise in an in-memory dict (fine for one worker).
+# Both layers degrade gracefully so the app runs with zero extra config.
+
+SECRET_FIELDS = ("dt_token", "gl_token", "slack_bot_token")
+_ENC_PREFIX   = "enc::"
+_fernet_cache: list = []
+
+
+def _fernet():
+    """Lazily build the Fernet cipher from SESSION_ENC_KEY (cached, may be None)."""
+    if _fernet_cache:
+        return _fernet_cache[0]
+    key = os.getenv("SESSION_ENC_KEY", "").strip()
+    cipher = None
+    if key:
+        try:
+            from cryptography.fernet import Fernet
+            cipher = Fernet(key.encode())
+        except Exception as e:
+            logger.warning("Token encryption disabled (bad SESSION_ENC_KEY): %s", e)
+    else:
+        logger.info("SESSION_ENC_KEY not set — tokens stored unencrypted")
+    _fernet_cache.append(cipher)
+    return cipher
+
+
+def _enc(value):
+    cipher = _fernet()
+    if not cipher or not isinstance(value, str) or not value:
+        return value
+    return _ENC_PREFIX + cipher.encrypt(value.encode()).decode()
+
+
+def _dec(value):
+    if not isinstance(value, str) or not value.startswith(_ENC_PREFIX):
+        return value
+    cipher = _fernet()
+    if not cipher:
+        return value
+    try:
+        return cipher.decrypt(value[len(_ENC_PREFIX):].encode()).decode()
+    except Exception:
+        return value
+
+
+def _enc_row(d):
+    return {k: (_enc(v) if k in SECRET_FIELDS else v) for k, v in d.items()}
+
+
+def _dec_row(d):
+    return {k: (_dec(v) if k in SECRET_FIELDS else v) for k, v in d.items()}
+
+
+class SessionStore:
+    """Dict-like store: Firestore-backed when enabled, else in-memory.
+    Secret fields are encrypted on write and decrypted on read."""
+
+    def __init__(self, collection: str):
+        self._mem: dict = {}
+        self._col = None
+        if os.getenv("FIRESTORE_SESSIONS") == "1":
+            try:
+                from google.cloud import firestore
+                self._col = firestore.Client().collection(collection)
+                logger.info("SessionStore[%s]: Firestore backend active", collection)
+            except Exception as e:
+                logger.warning("Firestore unavailable for %s — using memory: %s", collection, e)
+
+    def __setitem__(self, key, value):
+        row = _enc_row(value)
+        if self._col is not None:
+            try:
+                self._col.document(key).set(row)
+                return
+            except Exception as e:
+                logger.warning("Firestore write failed for %s — using memory: %s", key, e)
+        self._mem[key] = row
+
+    def get(self, key, default=None):
+        row = None
+        if self._col is not None:
+            try:
+                doc = self._col.document(key).get()
+                row = doc.to_dict() if doc.exists else None
+            except Exception as e:
+                logger.warning("Firestore read failed for %s: %s", key, e)
+        if row is None:
+            row = self._mem.get(key)
+        return _dec_row(row) if row is not None else default
+
+    def __getitem__(self, key):
+        v = self.get(key)
+        if v is None:
+            raise KeyError(key)
+        return v
+
+    def __contains__(self, key):
+        return self.get(key) is not None
+
+
+sessions      = SessionStore(os.getenv("FIRESTORE_COLLECTION", "spark_sessions"))
+oauth_pending = SessionStore("spark_oauth_pending")
+incidents: dict = {}  # ephemeral demo state — mutated in place by worker threads, stays in memory
 
 WEBHOOK_URL          = os.getenv("WEBHOOK_URL", "https://sre-webhook-366154347729.us-central1.run.app")
 SLACK_BOT_TOKEN      = os.getenv("SLACK_BOT_TOKEN", "")
 SLACK_CHANNEL_ID     = os.getenv("SLACK_CHANNEL_ID", "")
 SLACK_SIGNING_SECRET = os.getenv("SLACK_SIGNING_SECRET", "")
+SLACK_CLIENT_ID      = os.getenv("SLACK_CLIENT_ID", "")
+SLACK_CLIENT_SECRET  = os.getenv("SLACK_CLIENT_SECRET", "")
+SLACK_OAUTH_SCOPES   = os.getenv("SLACK_OAUTH_SCOPES", "chat:write,channels:read,groups:read")
 
 DEMO_SERVICES = [
     {"name": "payment-service",     "type": "Java",    "status": "healthy"},
@@ -126,6 +236,45 @@ def _dt_get_entities(dt_url: str, dt_token: str, bearer: bool = False):
     )
 
 
+# ─── Slack channel resolution ─────────────────────────────────────────────────
+
+_SLACK_ID_RE = re.compile(r"^[CGD][A-Z0-9]{6,}$")
+
+
+def _slack_list_channels(bot_token: str, pages: int = 8):
+    """Return [{id, name}] of channels the bot can see (public + private)."""
+    out, cursor = [], ""
+    for _ in range(pages):
+        params = {"types": "public_channel,private_channel", "limit": 200, "exclude_archived": "true"}
+        if cursor:
+            params["cursor"] = cursor
+        r = requests.get(
+            "https://slack.com/api/conversations.list",
+            headers={"Authorization": f"Bearer {bot_token}"}, params=params, timeout=8,
+        ).json()
+        if not r.get("ok"):
+            raise ValueError(f"Could not list Slack channels: {r.get('error')}")
+        out += [{"id": c["id"], "name": c.get("name", "")} for c in r.get("channels", [])]
+        cursor = (r.get("response_metadata") or {}).get("next_cursor", "")
+        if not cursor:
+            break
+    return out
+
+
+def _resolve_slack_channel(bot_token: str, channel: str):
+    """Accept a channel ID (C…/G…/D…) or a name (#alerts / alerts) and return
+    (channel_id, channel_name). Names are resolved via conversations.list."""
+    channel = (channel or "").strip().lstrip("#")
+    if not channel:
+        return "", None
+    if _SLACK_ID_RE.match(channel):
+        return channel, None
+    for c in _slack_list_channels(bot_token):
+        if c["name"] == channel:
+            return c["id"], c["name"]
+    raise ValueError(f"Slack channel '#{channel}' not found — invite the bot to it first")
+
+
 # ─── Connect / Demo ───────────────────────────────────────────────────────────
 
 @app.route("/connect", methods=["POST"])
@@ -184,16 +333,27 @@ def connect():
             pass
 
     # Validate Slack (optional — step 3 of the connect wizard).
-    # When the user provides a bot token we verify it and require a channel so
-    # this session gets its OWN incident notifications instead of the shared one.
+    # The bot token comes either from a one-click OAuth handshake (slack_oauth_state,
+    # token kept server-side) or a manually pasted token. Either way this session
+    # gets its OWN incident notifications instead of the shared workspace.
+    sl_state     = (data.get("slack_oauth_state") or "").strip()
     sl_bot_token = (data.get("slack_bot_token") or "").strip()
     sl_channel   = (data.get("slack_channel_id") or "").strip()
     slack_connected = False
     slack_team      = None
     slack_bot_user  = None
+    slack_channel_name = None
+
+    if sl_state:
+        pend = oauth_pending.get(sl_state)
+        if not pend or not pend.get("authed"):
+            return jsonify({"error": "Slack authorization expired — click Add to Slack again"}), 400
+        sl_bot_token = pend.get("slack_bot_token", "")
+        slack_team   = pend.get("team")
+
     if sl_bot_token:
         if not sl_channel:
-            return jsonify({"error": "Slack channel ID is required when connecting Slack"}), 400
+            return jsonify({"error": "Pick a Slack channel for incident alerts"}), 400
         try:
             auth = requests.post(
                 "https://slack.com/api/auth.test",
@@ -203,40 +363,46 @@ def connect():
             return jsonify({"error": f"Slack connection failed: {e}"}), 400
         if not auth.get("ok"):
             return jsonify({"error": f"Slack auth failed: {auth.get('error')}. Check the bot token."}), 400
+        try:
+            sl_channel, slack_channel_name = _resolve_slack_channel(sl_bot_token, sl_channel)
+        except ValueError as e:
+            return jsonify({"error": str(e)}), 400
         slack_connected = True
-        slack_team      = auth.get("team")
+        slack_team      = slack_team or auth.get("team")
         slack_bot_user  = auth.get("user")
 
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
-        "dt_url":            dt_url,
-        "dt_token":          stored_token,
-        "gl_url":            gl_url,
-        "gl_token":          gl_token,
-        "gl_project_id":     gl_project,
-        "env_name":          env_name,
-        "services_count":    services_count,
-        "services":          services,
-        "gl_username":       gl_username,
-        "project_name":      project_name,
-        "slack_bot_token":   sl_bot_token,
-        "slack_channel_id":  sl_channel,
-        "slack_connected":   slack_connected,
-        "slack_team":        slack_team,
-        "created_at":        datetime.now(timezone.utc).isoformat(),
+        "dt_url":              dt_url,
+        "dt_token":            stored_token,
+        "gl_url":              gl_url,
+        "gl_token":            gl_token,
+        "gl_project_id":       gl_project,
+        "env_name":            env_name,
+        "services_count":      services_count,
+        "services":            services,
+        "gl_username":         gl_username,
+        "project_name":        project_name,
+        "slack_bot_token":     sl_bot_token,
+        "slack_channel_id":    sl_channel,
+        "slack_channel_name":  slack_channel_name,
+        "slack_connected":     slack_connected,
+        "slack_team":          slack_team,
+        "created_at":          datetime.now(timezone.utc).isoformat(),
     }
 
     return jsonify({
-        "session_id":      session_id,
-        "env_name":        env_name,
-        "services_count":  services_count,
-        "services":        services,
-        "gl_username":     gl_username,
-        "project_name":    project_name,
-        "slack_connected": slack_connected,
-        "slack_team":      slack_team,
-        "slack_bot_user":  slack_bot_user,
-        "webhook_url":     f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
+        "session_id":         session_id,
+        "env_name":           env_name,
+        "services_count":     services_count,
+        "services":           services,
+        "gl_username":        gl_username,
+        "project_name":       project_name,
+        "slack_connected":    slack_connected,
+        "slack_team":         slack_team,
+        "slack_bot_user":     slack_bot_user,
+        "slack_channel_name": slack_channel_name,
+        "webhook_url":        f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
     })
 
 
@@ -732,6 +898,92 @@ def slack_actions():
 # ─── Direct approve/reject via URL (used by Slack URL buttons) ───────────────
 
 APP_URL = os.getenv("APP_URL", "https://spark-366154347729.us-central1.run.app")
+
+
+# ─── Slack "Add to Slack" OAuth (one-click connect) ──────────────────────────
+# Enabled only when SLACK_CLIENT_ID + SLACK_CLIENT_SECRET are set. The bot token
+# returned by Slack is kept server-side keyed by an opaque `state` handle — the
+# browser only ever sees the handle, never the token.
+
+def _oauth_popup_html(state=None, team=None, error=None):
+    import json as _j
+    msg = _j.dumps({"type": "spark_slack_oauth", "state": state, "team": team, "error": error})
+    note = (f"✅ Connected to {team}" if not error else f"❌ {error}")
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>Slack</title></head>
+<body style="background:#08080a;color:#f0f0f2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
+<div style="text-align:center"><div style="font-size:40px">{'💬' if not error else '⚠️'}</div>
+<p>{note}. You can close this window.</p></div>
+<script>
+  try {{ if (window.opener) window.opener.postMessage({msg}, "*"); }} catch (e) {{}}
+  setTimeout(function () {{ window.close(); }}, 900);
+</script></body></html>"""
+
+
+@app.route("/slack/oauth/config")
+def slack_oauth_config():
+    return jsonify({"enabled": bool(SLACK_CLIENT_ID and SLACK_CLIENT_SECRET)})
+
+
+@app.route("/slack/oauth/start")
+def slack_oauth_start():
+    if not (SLACK_CLIENT_ID and SLACK_CLIENT_SECRET):
+        return jsonify({"error": "Slack OAuth not configured"}), 503
+    state = uuid.uuid4().hex
+    oauth_pending[state] = {"authed": False, "created_at": datetime.now(timezone.utc).isoformat()}
+    url = "https://slack.com/oauth/v2/authorize?" + urlencode({
+        "client_id":    SLACK_CLIENT_ID,
+        "scope":        SLACK_OAUTH_SCOPES,
+        "redirect_uri": f"{APP_URL}/slack/oauth/callback",
+        "state":        state,
+    })
+    return redirect(url)
+
+
+@app.route("/slack/oauth/callback")
+def slack_oauth_callback():
+    code  = request.args.get("code", "")
+    state = request.args.get("state", "")
+    if not code or not state or oauth_pending.get(state) is None:
+        return _oauth_popup_html(error="Invalid or expired authorization"), 400
+    try:
+        d = requests.post(
+            "https://slack.com/api/oauth.v2.access",
+            data={
+                "client_id":     SLACK_CLIENT_ID,
+                "client_secret": SLACK_CLIENT_SECRET,
+                "code":          code,
+                "redirect_uri":  f"{APP_URL}/slack/oauth/callback",
+            }, timeout=10,
+        ).json()
+    except Exception as e:
+        return _oauth_popup_html(error=str(e)), 400
+    if not d.get("ok"):
+        return _oauth_popup_html(error=d.get("error", "oauth_failed")), 400
+
+    team = (d.get("team") or {}).get("name")
+    oauth_pending[state] = {
+        "authed":          True,
+        "slack_bot_token": d.get("access_token", ""),
+        "team":            team,
+        "created_at":      datetime.now(timezone.utc).isoformat(),
+    }
+    return _oauth_popup_html(state=state, team=team)
+
+
+@app.route("/slack/channels")
+def slack_channels():
+    """List channels for a completed OAuth handshake (token stays server-side)."""
+    state = request.args.get("state", "")
+    pend  = oauth_pending.get(state)
+    if not pend or not pend.get("authed"):
+        return jsonify({"error": "Not authorized"}), 400
+    try:
+        channels = _slack_list_channels(pend.get("slack_bot_token", ""))
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    channels.sort(key=lambda c: c["name"])
+    return jsonify({"channels": channels})
+
 
 @app.route("/approve/<incident_id>")
 def approve_redirect(incident_id):

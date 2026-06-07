@@ -426,11 +426,63 @@ function ConnectPage({ t, onBack, onConnected }) {
   const [glToken,     setGlToken]   = useState("");
   const [slToken,     setSlToken]   = useState("");
   const [slChannel,   setSlChannel] = useState("");
+  const [oauthEnabled, setOauthEnabled] = useState(false);
+  const [manualSlack,  setManualSlack]  = useState(false);
+  const [slState,     setSlState]   = useState("");      // opaque OAuth handle
+  const [slTeam,      setSlTeam]     = useState("");
+  const [slChannels,  setSlChannels] = useState(null);   // null = not loaded
+  const [slLoadingCh, setSlLoadingCh] = useState(false);
   const [loading,     setLoading]   = useState(false);
   const [error,       setError]     = useState("");
 
   // Step 1 is valid when URL + appropriate auth fields are filled
   const step1Valid = dtUrl && (useOAuth ? (dtClientId && dtClientSec) : dtToken);
+
+  // Is "Add to Slack" OAuth available on this deployment?
+  useEffect(() => {
+    fetch(`${API}/slack/oauth/config`)
+      .then(r => r.json())
+      .then(d => setOauthEnabled(!!d.enabled))
+      .catch(() => {});
+  }, []);
+
+  // Receive the OAuth result from the popup window
+  useEffect(() => {
+    const onMsg = (e) => {
+      const d = e.data;
+      if (!d || d.type !== "spark_slack_oauth") return;
+      if (d.error) { setError(`Slack: ${d.error}`); return; }
+      if (d.state) {
+        setError(""); setSlState(d.state); setSlTeam(d.team || "your workspace");
+        loadChannels(d.state);
+      }
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, []);
+
+  const loadChannels = async (state) => {
+    setSlLoadingCh(true);
+    try {
+      const r = await fetch(`${API}/slack/channels?state=${encodeURIComponent(state)}`);
+      const d = await r.json();
+      if (r.ok) setSlChannels(d.channels || []);
+      else setError(d.error || "Could not load channels");
+    } catch { setError("Could not load Slack channels"); }
+    finally { setSlLoadingCh(false); }
+  };
+
+  const openSlackOAuth = () => {
+    setError("");
+    window.open(`${API}/slack/oauth/start`, "spark_slack_oauth", "width=640,height=720");
+  };
+
+  const resetSlackOAuth = () => {
+    setSlState(""); setSlTeam(""); setSlChannels(null); setSlChannel("");
+  };
+
+  // Show manual token entry when OAuth is unavailable or the user opts into it
+  const showManualSlack = !oauthEnabled || manualSlack;
 
   const goStep2 = () => {
     if (!dtUrl.startsWith("http")) { setError("Enter a valid URL (https://...)"); return; }
@@ -447,10 +499,15 @@ function ConnectPage({ t, onBack, onConnected }) {
     setError(""); setStep(3);
   };
 
-  const connect = async (slBot = slToken, slCh = slChannel) => {
-    // Slack is optional, but if a token is entered a channel is required.
-    if (slBot.trim() && !slCh.trim()) {
-      setError("Enter the Slack channel ID, or skip Slack for now");
+  const connect = async ({ skip = false } = {}) => {
+    const usingOAuth  = !skip && !!slState;
+    const slBot       = skip ? "" : (usingOAuth ? "" : slToken.trim());
+    const oauthState  = skip ? "" : (usingOAuth ? slState : "");
+    const slCh        = skip ? "" : slChannel.trim();
+
+    // Slack is optional, but once a workspace/token is set a channel is required.
+    if (!skip && (slBot || oauthState) && !slCh) {
+      setError("Pick a Slack channel for incident alerts");
       return;
     }
     setLoading(true); setError("");
@@ -461,7 +518,7 @@ function ConnectPage({ t, onBack, onConnected }) {
       const body = {
         ...dtPart,
         gl_url:glUrl.trim(), gl_token:glToken.trim(), gl_project_id:glProject.trim(),
-        slack_bot_token:slBot.trim(), slack_channel_id:slCh.trim(),
+        slack_bot_token:slBot, slack_oauth_state:oauthState, slack_channel_id:slCh,
       };
       const r = await fetch(`${API}/connect`, {
         method:"POST",
@@ -606,23 +663,80 @@ function ConnectPage({ t, onBack, onConnected }) {
                 </div>
               </div>
 
-              <label style={{ display:"block", marginBottom:14 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Bot User OAuth Token</div>
-                <input value={slToken} onChange={e => setSlToken(e.target.value)}
-                  placeholder="xoxb-..." type="password" style={inp(t)} />
-              </label>
-              <label style={{ display:"block", marginBottom:8 }}>
-                <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Channel ID</div>
-                <input value={slChannel} onChange={e => setSlChannel(e.target.value)}
-                  placeholder="e.g. C0123ABCDEF" style={inp(t)} />
-              </label>
-              <div style={{ fontSize:11, color:t.textMuted, marginBottom:24, lineHeight:1.7 }}>
-                api.slack.com/apps → your app → OAuth &amp; Permissions → bot scopes{" "}
-                {["chat:write"].map(s => (
-                  <code key={s} style={{ background:t.codeBg, border:`1px solid ${t.border}`, padding:"1px 5px", borderRadius:3, marginRight:4, fontSize:11 }}>{s}</code>
-                ))}
-                · invite the bot to the channel, then copy the channel ID from its “View channel details”.
-              </div>
+              {/* OAuth path: one-click connect, then pick a channel */}
+              {!showManualSlack && !slState && (
+                <>
+                  <button onClick={openSlackOAuth} style={{
+                    width:"100%", display:"flex", alignItems:"center", justifyContent:"center", gap:10,
+                    background:"#4A154B", color:"#fff", border:"none", borderRadius:10,
+                    padding:"12px 0", fontSize:15, fontWeight:700, cursor:"pointer", marginBottom:14,
+                  }}>
+                    <span style={{ fontSize:18 }}>💬</span> Add to Slack
+                  </button>
+                  <button onClick={() => setManualSlack(true)} style={{
+                    width:"100%", background:"transparent", color:t.textSub, border:"none",
+                    fontSize:13, cursor:"pointer", textDecoration:"underline", marginBottom:8,
+                  }}>
+                    or paste a bot token manually
+                  </button>
+                </>
+              )}
+
+              {/* OAuth done: channel picker */}
+              {!showManualSlack && slState && (
+                <>
+                  <div style={{
+                    background:t.approveBg, border:`1px solid ${t.approve}44`, color:t.approve,
+                    borderRadius:8, padding:"10px 14px", fontSize:13, marginBottom:14,
+                    display:"flex", alignItems:"center", gap:8,
+                  }}>
+                    ✓ Connected to <strong>{slTeam}</strong>
+                  </div>
+                  <label style={{ display:"block", marginBottom:8 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Alert channel</div>
+                    <select value={slChannel} onChange={e => setSlChannel(e.target.value)} style={{ ...inp(t), cursor:"pointer" }}>
+                      <option value="">{slLoadingCh ? "Loading channels…" : "Select a channel…"}</option>
+                      {(slChannels || []).map(c => (
+                        <option key={c.id} value={c.id}>#{c.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <div style={{ fontSize:11, color:t.textMuted, marginBottom:24, lineHeight:1.7 }}>
+                    {slChannels && slChannels.length === 0
+                      ? "No channels found — invite the SPARK bot to a channel, then reconnect."
+                      : "Don’t see your channel? Invite the SPARK bot to it, then reconnect."}{" "}
+                    <button onClick={resetSlackOAuth} style={{ background:"none", border:"none", color:t.accent, cursor:"pointer", fontSize:11, padding:0, textDecoration:"underline" }}>
+                      Reconnect
+                    </button>
+                  </div>
+                </>
+              )}
+
+              {/* Manual token path */}
+              {showManualSlack && (
+                <>
+                  <label style={{ display:"block", marginBottom:14 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Bot User OAuth Token</div>
+                    <input value={slToken} onChange={e => setSlToken(e.target.value)}
+                      placeholder="xoxb-..." type="password" style={inp(t)} />
+                  </label>
+                  <label style={{ display:"block", marginBottom:8 }}>
+                    <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Channel name or ID</div>
+                    <input value={slChannel} onChange={e => setSlChannel(e.target.value)}
+                      placeholder="#alerts  or  C0123ABCDEF" style={inp(t)} />
+                  </label>
+                  <div style={{ fontSize:11, color:t.textMuted, marginBottom:24, lineHeight:1.7 }}>
+                    api.slack.com/apps → your app → OAuth &amp; Permissions → bot scopes{" "}
+                    {["chat:write","channels:read"].map(s => (
+                      <code key={s} style={{ background:t.codeBg, border:`1px solid ${t.border}`, padding:"1px 5px", borderRadius:3, marginRight:4, fontSize:11 }}>{s}</code>
+                    ))}
+                    · invite the bot to the channel.
+                    {oauthEnabled && (
+                      <>{" "}<button onClick={() => { setManualSlack(false); setSlToken(""); }} style={{ background:"none", border:"none", color:t.accent, cursor:"pointer", fontSize:11, padding:0, textDecoration:"underline" }}>Use one-click instead</button></>
+                    )}
+                  </div>
+                </>
+              )}
             </>
           )}
 
@@ -660,7 +774,7 @@ function ConnectPage({ t, onBack, onConnected }) {
           {/* Skip Slack — only on the optional final step */}
           {step === 3 && !loading && (
             <button
-              onClick={() => connect("", "")}
+              onClick={() => connect({ skip: true })}
               style={{
                 width:"100%", marginTop:12, background:"transparent", color:t.textSub,
                 border:"none", fontSize:13, cursor:"pointer", textDecoration:"underline",
@@ -1155,7 +1269,8 @@ function DashboardPage({ t, session, incidents, onSimulate, simulating, doneInc,
           <span style={{ fontSize:12, color:t.textSub }}>· @{session.gl_username}</span>
           {session.slack_connected && (
             <span style={{ fontSize:12, color:t.textSub, display:"inline-flex", alignItems:"center", gap:4 }}>
-              · 💬 Slack{session.slack_team ? ` · ${session.slack_team}` : ""}
+              · 💬 {session.slack_channel_name ? `#${session.slack_channel_name}` : "Slack"}
+              {session.slack_team ? ` · ${session.slack_team}` : ""}
             </span>
           )}
 

@@ -3,7 +3,7 @@
 FROM python:3.11-slim
 WORKDIR /app
 
-RUN pip install --no-cache-dir flask flask-cors gunicorn requests
+RUN pip install --no-cache-dir flask flask-cors gunicorn requests cryptography google-cloud-firestore
 
 COPY server.py .
 COPY dist ./static
