@@ -479,7 +479,9 @@ def list_incidents():
     session_id = request.args.get("session")
     result = list(incidents.values())
     if session_id:
-        result = [i for i in result if i.get("session_id") == session_id]
+        # Show this session's incidents PLUS global agent incidents (the real
+        # agent / webhook posts with no session_id) so they appear on the dashboard.
+        result = [i for i in result if i.get("session_id") in (session_id, None)]
     return jsonify(result)
 
 
