@@ -28,17 +28,9 @@ CORS(app)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-
-# ─── Token encryption + session persistence ──────────────────────────────────
-# Tokens (Dynatrace, GitLab, Slack) are encrypted at rest with Fernet when
-# SESSION_ENC_KEY is set. Sessions are stored in Firestore when
-# FIRESTORE_SESSIONS=1, otherwise in an in-memory dict (fine for one worker).
-# Both layers degrade gracefully so the app runs with zero extra config.
-
 SECRET_FIELDS = ("dt_token", "gl_token", "slack_bot_token")
 _ENC_PREFIX   = "enc::"
 _fernet_cache: list = []
-
 
 def _fernet():
     """Lazily build the Fernet cipher from SESSION_ENC_KEY (cached, may be None)."""
@@ -57,13 +49,11 @@ def _fernet():
     _fernet_cache.append(cipher)
     return cipher
 
-
 def _enc(value):
     cipher = _fernet()
     if not cipher or not isinstance(value, str) or not value:
         return value
     return _ENC_PREFIX + cipher.encrypt(value.encode()).decode()
-
 
 def _dec(value):
     if not isinstance(value, str) or not value.startswith(_ENC_PREFIX):
@@ -76,14 +66,11 @@ def _dec(value):
     except Exception:
         return value
 
-
 def _enc_row(d):
     return {k: (_enc(v) if k in SECRET_FIELDS else v) for k, v in d.items()}
 
-
 def _dec_row(d):
     return {k: (_dec(v) if k in SECRET_FIELDS else v) for k, v in d.items()}
-
 
 class SessionStore:
     """Dict-like store: Firestore-backed when enabled, else in-memory.
@@ -131,10 +118,9 @@ class SessionStore:
     def __contains__(self, key):
         return self.get(key) is not None
 
-
 sessions      = SessionStore(os.getenv("FIRESTORE_COLLECTION", "spark_sessions"))
 oauth_pending = SessionStore("spark_oauth_pending")
-incidents: dict = {}  # ephemeral demo state — mutated in place by worker threads, stays in memory
+incidents: dict = {}
 
 WEBHOOK_URL          = os.getenv("WEBHOOK_URL", "https://sre-webhook-366154347729.us-central1.run.app")
 SLACK_BOT_TOKEN      = os.getenv("SLACK_BOT_TOKEN", "")
@@ -153,9 +139,6 @@ DEMO_SERVICES = [
     {"name": "api-gateway",         "type": "Go",      "status": "healthy"},
 ]
 
-
-# ─── Helpers ──────────────────────────────────────────────────────────────────
-
 def _dt_oauth_token(client_id: str, client_secret: str) -> str:
     """Exchange OAuth2 client credentials for a DT bearer token."""
     r = requests.post(
@@ -168,7 +151,6 @@ def _dt_oauth_token(client_id: str, client_secret: str) -> str:
         raise ValueError(f"Dynatrace OAuth2 failed: {r.json().get('error_description') or r.text[:200]}")
     return r.json()["access_token"]
 
-
 def _dt_get_entities(dt_url: str, dt_token: str, bearer: bool = False):
     """
     Validate DT credentials and fetch service entities.
@@ -180,7 +162,6 @@ def _dt_get_entities(dt_url: str, dt_token: str, bearer: bool = False):
     headers     = {"Authorization": auth_header}
     last_err    = "Could not reach Dynatrace"
 
-    # Attempt 1: entities endpoint
     entity_paths = [
         (f"{dt_url}/platform/classic/environment-api/v2/entities",
          {"entitySelector": "type(SERVICE)", "pageSize": "10"}),
@@ -210,7 +191,6 @@ def _dt_get_entities(dt_url: str, dt_token: str, bearer: bool = False):
         except Exception as exc:
             last_err = str(exc)
 
-    # Fallback: prove the token is valid via problems endpoint
     probe_paths = [
         f"{dt_url}/platform/classic/environment-api/v2/problems",
         f"{dt_url}/api/v2/problems",
@@ -235,11 +215,7 @@ def _dt_get_entities(dt_url: str, dt_token: str, bearer: bool = False):
         "Check the URL (e.g. https://abc12345.apps.dynatrace.com) and your credentials."
     )
 
-
-# ─── Slack channel resolution ─────────────────────────────────────────────────
-
 _SLACK_ID_RE = re.compile(r"^[CGD][A-Z0-9]{6,}$")
-
 
 def _slack_list_channels(bot_token: str, pages: int = 8):
     """Return [{id, name}] of channels the bot can see (public + private)."""
@@ -260,7 +236,6 @@ def _slack_list_channels(bot_token: str, pages: int = 8):
             break
     return out
 
-
 def _resolve_slack_channel(bot_token: str, channel: str):
     """Accept a channel ID (C…/G…/D…) or a name (#alerts / alerts) and return
     (channel_id, channel_name). Names are resolved via conversations.list."""
@@ -273,9 +248,6 @@ def _resolve_slack_channel(bot_token: str, channel: str):
         if c["name"] == channel:
             return c["id"], c["name"]
     raise ValueError(f"Slack channel '#{channel}' not found — invite the bot to it first")
-
-
-# ─── Connect / Demo ───────────────────────────────────────────────────────────
 
 @app.route("/connect", methods=["POST"])
 def connect():
@@ -295,7 +267,6 @@ def connect():
     if not gl_token:
         return jsonify({"error": "GitLab token required"}), 400
 
-    # Validate Dynatrace — support both classic API tokens and OAuth2 client credentials
     try:
         if dt_client_id and dt_client_sec:
             bearer_token = _dt_oauth_token(dt_client_id, dt_client_sec)
@@ -309,7 +280,6 @@ def connect():
 
     env_name = dt_url.replace("https://", "").split(".")[0]
 
-    # Validate GitLab
     try:
         r = requests.get(
             f"{gl_url}/api/v4/user",
@@ -332,10 +302,6 @@ def connect():
         except Exception:
             pass
 
-    # Validate Slack (optional — step 3 of the connect wizard).
-    # The bot token comes either from a one-click OAuth handshake (slack_oauth_state,
-    # token kept server-side) or a manually pasted token. Either way this session
-    # gets its OWN incident notifications instead of the shared workspace.
     sl_state     = (data.get("slack_oauth_state") or "").strip()
     sl_bot_token = (data.get("slack_bot_token") or "").strip()
     sl_channel   = (data.get("slack_channel_id") or "").strip()
@@ -405,7 +371,6 @@ def connect():
         "webhook_url":        f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
     })
 
-
 @app.route("/demo", methods=["POST"])
 def start_demo():
     """No-credentials sandbox session for judges who don't have Dynatrace."""
@@ -434,16 +399,12 @@ def start_demo():
         "webhook_url":    f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
     })
 
-
 @app.route("/sessions/<session_id>", methods=["GET"])
 def get_session(session_id):
     s = sessions.get(session_id)
     if not s:
         return jsonify({"error": "Not found"}), 404
     return jsonify({k: v for k, v in s.items() if k not in ("dt_token", "gl_token", "slack_bot_token")})
-
-
-# ─── Incidents ────────────────────────────────────────────────────────────────
 
 @app.route("/incidents", methods=["POST"])
 def create_incident():
@@ -467,23 +428,17 @@ def create_incident():
         "steps":       [],
         **data,
     }
-    # Real agent (ApprovalClient) posts the briefing here — notify Slack just like
-    # the Simulate path does, so the live-agent flow also reaches the engineer's Slack.
     if incidents[incident_id].get("root_cause"):
         threading.Thread(target=_notify_slack, args=(incident_id,), daemon=True).start()
     return jsonify({"incident_id": incident_id}), 201
-
 
 @app.route("/incidents", methods=["GET"])
 def list_incidents():
     session_id = request.args.get("session")
     result = list(incidents.values())
     if session_id:
-        # Show this session's incidents PLUS global agent incidents (the real
-        # agent / webhook posts with no session_id) so they appear on the dashboard.
         result = [i for i in result if i.get("session_id") in (session_id, None)]
     return jsonify(result)
-
 
 @app.route("/incidents/<incident_id>", methods=["GET"])
 def get_incident(incident_id):
@@ -491,7 +446,6 @@ def get_incident(incident_id):
     if not inc:
         return jsonify({"error": "Not found"}), 404
     return jsonify(inc)
-
 
 @app.route("/incidents/<incident_id>/decide", methods=["POST"])
 def decide(incident_id):
@@ -519,7 +473,6 @@ def decide(incident_id):
 
     return jsonify(inc)
 
-
 @app.route("/incidents/<incident_id>/step", methods=["POST"])
 def add_step(incident_id):
     inc = incidents.get(incident_id)
@@ -534,7 +487,6 @@ def add_step(incident_id):
     inc.setdefault("steps", []).append(step)
     return jsonify(step), 201
 
-
 @app.route("/incidents/<incident_id>/resolve", methods=["POST"])
 def resolve_incident(incident_id):
     inc = incidents.get(incident_id)
@@ -543,9 +495,6 @@ def resolve_incident(incident_id):
     inc["status"]      = "resolved"
     inc["resolved_at"] = datetime.now(timezone.utc).isoformat()
     return jsonify(inc)
-
-
-# ─── Simulate ────────────────────────────────────────────────────────────────
 
 @app.route("/sessions/<session_id>/simulate", methods=["POST"])
 def simulate_incident(session_id):
@@ -575,7 +524,6 @@ def simulate_incident(session_id):
     ).start()
 
     return jsonify({"incident_id": incident_id})
-
 
 def _simulate_investigation(incident_id: str, session_id: str):
     STEPS = [
@@ -625,9 +573,7 @@ def _simulate_investigation(incident_id: str, session_id: str):
         "rollback_version":   "v2.3.0",
     })
 
-    # Notify Slack (no-op if SLACK_BOT_TOKEN not configured)
     threading.Thread(target=_notify_slack, args=(incident_id,), daemon=True).start()
-
 
 def _execute_rollback(incident_id: str, session: dict):
     inc = incidents.get(incident_id)
@@ -693,9 +639,6 @@ def _execute_rollback(incident_id: str, session: dict):
     inc["status"]      = "resolved"
     inc["resolved_at"] = datetime.now(timezone.utc).isoformat()
 
-
-# ─── Slack approval notifications ────────────────────────────────────────────
-
 def _session_slack(incident_id: str):
     """Resolve the Slack bot token + channel for an incident.
     Prefers the per-session credentials the user connected at /connect (step 3),
@@ -705,7 +648,6 @@ def _session_slack(incident_id: str):
     bot_token = session.get("slack_bot_token") or SLACK_BOT_TOKEN
     channel   = session.get("slack_channel_id") or SLACK_CHANNEL_ID
     return bot_token, channel
-
 
 def _notify_slack(incident_id: str):
     """Post a Slack Block Kit approval card when an incident needs a decision."""
@@ -770,7 +712,6 @@ def _notify_slack(incident_id: str):
     channel = channel_cfg
 
     try:
-        # For DM channels (D...) ensure the conversation is open first
         if channel_cfg.startswith("D"):
             open_r = requests.post(
                 "https://slack.com/api/conversations.open",
@@ -803,7 +744,6 @@ def _notify_slack(incident_id: str):
         logger.warning(f"Slack notify failed: {e}")
         incidents[incident_id]["slack_error"] = str(e)
 
-
 def _update_slack_message(incident_id: str, decision: str, engineer: str):
     """Replace the approval buttons with a resolved status message."""
     bot_token, channel_cfg = _session_slack(incident_id)
@@ -825,7 +765,6 @@ def _update_slack_message(incident_id: str, decision: str, engineer: str):
         )
     except Exception as e:
         logger.warning(f"Slack update failed: {e}")
-
 
 @app.route("/slack/test", methods=["GET"])
 def slack_test():
@@ -854,15 +793,12 @@ def slack_test():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-
 @app.route("/slack/actions", methods=["POST"])
 def slack_actions():
     """Handle interactive Slack button clicks (approve / reject)."""
-    # Read raw body FIRST — must happen before any form parsing
     import json as _json
     body_text = request.get_data(as_text=True)
 
-    # Verify Slack signature
     if SLACK_SIGNING_SECRET:
         ts  = request.headers.get("X-Slack-Request-Timestamp", "")
         sig = request.headers.get("X-Slack-Signature", "")
@@ -902,22 +838,13 @@ def slack_actions():
 
     return jsonify({"response_type": "ephemeral", "text": "Decision recorded ✓"})
 
-
-# ─── Direct approve/reject via URL (used by Slack URL buttons) ───────────────
-
 APP_URL = os.getenv("APP_URL", "https://spark-366154347729.us-central1.run.app")
-
-
-# ─── Slack "Add to Slack" OAuth (one-click connect) ──────────────────────────
-# Enabled only when SLACK_CLIENT_ID + SLACK_CLIENT_SECRET are set. The bot token
-# returned by Slack is kept server-side keyed by an opaque `state` handle — the
-# browser only ever sees the handle, never the token.
 
 def _oauth_popup_html(state=None, team=None, error=None):
     import json as _j
     import html as _h
     msg       = _j.dumps({"type": "spark_slack_oauth", "state": state, "team": team, "error": error})
-    target    = _j.dumps(APP_URL)  # pin postMessage to our origin, never "*"
+    target    = _j.dumps(APP_URL)
     safe_note = _h.escape(f"✅ Connected to {team}" if not error else f"❌ {error}")
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>Slack</title></head>
 <body style="background:#08080a;color:#f0f0f2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
@@ -928,11 +855,9 @@ def _oauth_popup_html(state=None, team=None, error=None):
   setTimeout(function () {{ window.close(); }}, 900);
 </script></body></html>"""
 
-
 @app.route("/slack/oauth/config")
 def slack_oauth_config():
     return jsonify({"enabled": bool(SLACK_CLIENT_ID and SLACK_CLIENT_SECRET)})
-
 
 @app.route("/slack/oauth/start")
 def slack_oauth_start():
@@ -947,7 +872,6 @@ def slack_oauth_start():
         "state":        state,
     })
     return redirect(url)
-
 
 @app.route("/slack/oauth/callback")
 def slack_oauth_callback():
@@ -979,7 +903,6 @@ def slack_oauth_callback():
     }
     return _oauth_popup_html(state=state, team=team)
 
-
 @app.route("/slack/channels")
 def slack_channels():
     """List channels for a completed OAuth handshake (token stays server-side)."""
@@ -993,7 +916,6 @@ def slack_channels():
         return jsonify({"error": str(e)}), 400
     channels.sort(key=lambda c: c["name"])
     return jsonify({"channels": channels})
-
 
 @app.route("/approve/<incident_id>")
 def approve_redirect(incident_id):
@@ -1013,7 +935,6 @@ def approve_redirect(incident_id):
     threading.Thread(target=_execute_rollback, args=(incident_id, session), daemon=True).start()
     threading.Thread(target=_update_slack_message, args=(incident_id, "approved", "slack-admin"), daemon=True).start()
 
-    # Redirect to dashboard so admin watches the live rollback
     return f"""<!doctype html>
 <html><head><meta http-equiv="refresh" content="0;url={APP_URL}/dashboard">
 <title>Approved</title></head>
@@ -1021,7 +942,6 @@ def approve_redirect(incident_id):
 <div style="text-align:center"><div style="font-size:48px">✅</div>
 <h2 style="color:#16a34a">Rollback Approved</h2>
 <p style="color:#6b6b7a">Redirecting to SPARK dashboard...</p></div></body></html>""", 200
-
 
 @app.route("/reject/<incident_id>")
 def reject_redirect(incident_id):
@@ -1048,13 +968,9 @@ def reject_redirect(incident_id):
 <h2 style="color:#dc2626">Rollback Rejected</h2>
 <p style="color:#6b6b7a">Redirecting to SPARK dashboard...</p></div></body></html>""", 200
 
-
-# ─── Health + SPA ────────────────────────────────────────────────────────────
-
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
-
 
 @app.route("/", defaults={"path": ""})
 @app.route("/<path:path>")
@@ -1063,7 +979,6 @@ def serve_spa(path):
     if path and os.path.exists(target):
         return send_from_directory(STATIC_DIR, path)
     return send_from_directory(STATIC_DIR, "index.html")
-
 
 @app.errorhandler(404)
 @app.errorhandler(405)
@@ -1074,7 +989,6 @@ def spa_fallback(e):
     if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):
         return send_from_directory(STATIC_DIR, "index.html")
     return jsonify({"error": "Not found"}), getattr(e, "code", 404)
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))

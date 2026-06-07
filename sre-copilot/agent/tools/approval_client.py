@@ -6,7 +6,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-
 class ApprovalClient:
     def __init__(self, webhook_url: str, poll_interval: int = 3, timeout: int = 300):
         self.webhook_url = webhook_url

@@ -5,7 +5,6 @@ Falls back to realistic mock data for demo/fake problem IDs (e.g. P-DEMO*).
 import requests
 from datetime import datetime, timezone, timedelta
 
-
 class DynatraceClient:
     TOKEN_URL = "https://sso.dynatrace.com/sso/oauth2/token"
 
@@ -60,7 +59,6 @@ class DynatraceClient:
                 ]
             }
         except Exception:
-            # Return demo data for synthetic/fake problem IDs
             start = datetime.now(timezone.utc) - timedelta(minutes=32)
             return {
                 "problem_id": problem_id,
@@ -98,7 +96,6 @@ class DynatraceClient:
                 "values": first.get("values", [])
             }
         except Exception:
-            # Simulate a memory leak ramp: stable then spiking at minute 28
             now = datetime.now(timezone.utc)
             timestamps, values = [], []
             for i in range(min(from_minutes_ago, 60)):

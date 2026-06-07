@@ -31,13 +31,9 @@ logger = logging.getLogger("payment-service")
 VERSION    = os.getenv("APP_VERSION", "2.3.1")
 START_TIME = time.time()
 
-# ── In-memory stores (production: Redis + Postgres) ───────────────────────────
 _transactions: dict       = {}
-_velocity:     dict       = defaultdict(list)   # card_hash → [unix timestamps]
-_audit_log:    list       = []                  # v2.3.1 regression — unbounded
-
-
-# ── Card validation (ISO/IEC 7812) ────────────────────────────────────────────
+_velocity:     dict       = defaultdict(list)
+_audit_log:    list       = []
 
 CARD_PATTERNS = {
     "Visa":       re.compile(r"^4[0-9]{12}(?:[0-9]{3,6})?$"),
@@ -55,9 +51,8 @@ SUPPORTED_CURRENCIES = {
 }
 
 MAX_AMOUNT        = 50_000.00
-VELOCITY_WINDOW   = 3600   # seconds — 1 hour sliding window
-VELOCITY_MAX_TXN  = 10     # max transactions per card per hour
-
+VELOCITY_WINDOW   = 3600
+VELOCITY_MAX_TXN  = 10
 
 def luhn_check(number: str) -> bool:
     """Luhn algorithm — validates card checksum (same as Stripe, Adyen, Square)."""
@@ -73,7 +68,6 @@ def luhn_check(number: str) -> bool:
         total += digit
     return total % 10 == 0
 
-
 def detect_network(number: str) -> str:
     clean = re.sub(r"[\s-]", "", number)
     for name, pattern in CARD_PATTERNS.items():
@@ -81,16 +75,11 @@ def detect_network(number: str) -> str:
             return name
     return "Unknown"
 
-
 def validate_expiry(month: int, year: int) -> bool:
     if not (1 <= month <= 12):
         return False
     now = datetime.now(timezone.utc)
-    # Card is valid through end of the expiry month
     return (year, month) >= (now.year, now.month)
-
-
-# ── Fraud detection ───────────────────────────────────────────────────────────
 
 def velocity_check(card_hash: str) -> tuple:
     now    = time.time()
@@ -101,7 +90,6 @@ def velocity_check(card_hash: str) -> tuple:
         return False, f"velocity_exceeded ({count} txn in last hour)"
     return True, ""
 
-
 def risk_score(amount: float, network: str, card_hash: str) -> float:
     score = 0.0
     if amount > 5_000:  score += 0.30
@@ -109,9 +97,6 @@ def risk_score(amount: float, network: str, card_hash: str) -> float:
     score += min(len(_velocity.get(card_hash, [])) * 0.05, 0.40)
     if network == "Unknown": score += 0.30
     return min(round(score, 2), 1.0)
-
-
-# ── v2.3.1 regression: in-memory PCI audit log ───────────────────────────────
 
 def _audit(txn: dict, req) -> None:
     """
@@ -134,16 +119,13 @@ def _audit(txn: dict, req) -> None:
             "pci_version":    "PCI-DSS-v4.0",
             "controls":       ["req-3", "req-4", "req-10"],
             "data_retention": "7-years",
-            "raw_headers":    dict(req.headers),            # large per-request blob
-            "checksum":       hashlib.sha256(               # full txn hash
+            "raw_headers":    dict(req.headers),
+            "checksum":       hashlib.sha256(
                 str(txn).encode()
             ).hexdigest(),
-            "reserved":       "X" * 4096,                  # "future regulatory fields"
+            "reserved":       "X" * 4096,
         },
     })
-
-
-# ── Charge logic ──────────────────────────────────────────────────────────────
 
 def _charge(payload: dict, req):
     card_number  = re.sub(r"[\s-]", "", str(payload.get("card_number", "")))
@@ -154,7 +136,6 @@ def _charge(payload: dict, req):
     currency     = str(payload.get("currency", "USD")).upper()
     merchant_id  = str(payload.get("merchant_id", "unknown"))
 
-    # --- validations ----------------------------------------------------------
     if not luhn_check(card_number):
         return {"error": "invalid_card", "message": "Card number failed Luhn check"}, 422
 
@@ -186,7 +167,6 @@ def _charge(payload: dict, req):
     if risk >= 0.90:
         return {"error": "transaction_declined", "decline_code": "high_risk"}, 402
 
-    # --- record ---------------------------------------------------------------
     _velocity[card_hash].append(time.time())
 
     txn = {
@@ -202,7 +182,6 @@ def _charge(payload: dict, req):
     }
     _transactions[txn["transaction_id"]] = txn
 
-    # v2.3.1 regression
     if VERSION == "2.3.1":
         _audit(txn, req)
         logger.warning(
@@ -217,9 +196,6 @@ def _charge(payload: dict, req):
     )
     return txn, 200
 
-
-# ── Routes ────────────────────────────────────────────────────────────────────
-
 @app.route("/health")
 def health():
     return jsonify({
@@ -230,7 +206,6 @@ def health():
         "audit_log_size":  len(_audit_log),
     })
 
-
 @app.route("/charge", methods=["POST"])
 def charge_endpoint():
     payload = request.get_json(silent=True)
@@ -238,7 +213,6 @@ def charge_endpoint():
         return jsonify({"error": "invalid_request", "message": "JSON body required"}), 400
     result, status = _charge(payload, request)
     return jsonify(result), status
-
 
 @app.route("/transactions", methods=["GET"])
 def list_transactions():
@@ -253,14 +227,12 @@ def list_transactions():
         "per_page":     per_page,
     })
 
-
 @app.route("/transactions/<txn_id>")
 def get_transaction(txn_id):
     txn = _transactions.get(txn_id)
     if not txn:
         return jsonify({"error": "not_found"}), 404
     return jsonify(txn)
-
 
 @app.route("/refund/<txn_id>", methods=["POST"])
 def refund(txn_id):
@@ -273,7 +245,6 @@ def refund(txn_id):
     txn["refunded_at"] = datetime.now(timezone.utc).isoformat()
     logger.info(f"refund ok | txn={txn_id}")
     return jsonify(txn)
-
 
 @app.route("/metrics")
 def metrics():
@@ -288,7 +259,6 @@ def metrics():
         "audit_log_entries":  len(_audit_log),
         "audit_log_size_kb":  round(len(_audit_log) * 5.2, 1),
     })
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))

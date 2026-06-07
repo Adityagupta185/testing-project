@@ -20,8 +20,6 @@ logger = logging.getLogger(__name__)
 
 DT_ENVIRONMENT = os.environ.get("DYNATRACE_URL", "")
 
-# ── MCP call (works locally where browser OAuth is available) ─────────────────
-
 async def _call_mcp(tool_name: str, arguments: dict) -> dict:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -41,15 +39,11 @@ async def _call_mcp(tool_name: str, arguments: dict) -> dict:
             except Exception:
                 return {"raw": raw}
 
-
 def _run_mcp(tool_name: str, arguments: dict) -> dict:
     try:
         return asyncio.run(_call_mcp(tool_name, arguments))
     except Exception as e:
         raise RuntimeError(f"MCP call failed: {e}") from e
-
-
-# ── Direct Dynatrace API (OAuth2 client credentials — used in Cloud Run) ──────
 
 def _dt_client():
     from tools.dynatrace_client import DynatraceClient
@@ -59,9 +53,6 @@ def _dt_client():
         os.environ["DT_CLIENT_SECRET"],
         os.environ["DT_ACCOUNT_URN"],
     )
-
-
-# ── Fallback mock data (when DT has no matching problem ID) ───────────────────
 
 def _mock_problem(problem_id):
     start = datetime.now(timezone.utc) - timedelta(minutes=32)
@@ -108,11 +99,7 @@ def _mock_logs(service_name):
         "_source": "mock",
     }
 
-
-# ── Public interface — MCP first, direct API second, mock last ────────────────
-
 def get_problem(problem_id: str) -> dict:
-    # 1. Try Dynatrace MCP server (local/interactive environments)
     try:
         result = _run_mcp("get_problem", {"problemId": problem_id})
         logger.info("Dynatrace MCP ✓ get_problem")
@@ -120,7 +107,6 @@ def get_problem(problem_id: str) -> dict:
     except Exception:
         pass
 
-    # 2. Try Dynatrace API directly (Cloud Run — OAuth2 client credentials)
     try:
         result = _dt_client().get_problem(problem_id)
         logger.info("Dynatrace API ✓ get_problem")
@@ -128,10 +114,8 @@ def get_problem(problem_id: str) -> dict:
     except Exception:
         pass
 
-    # 3. Demo fallback
     logger.info("Dynatrace mock ✓ get_problem")
     return _mock_problem(problem_id)
-
 
 def get_metrics(entity_id: str, metric: str, from_minutes_ago: int = 60) -> dict:
     now = datetime.now(timezone.utc)
@@ -156,7 +140,6 @@ def get_metrics(entity_id: str, metric: str, from_minutes_ago: int = 60) -> dict
 
     logger.info("Dynatrace mock ✓ get_metrics")
     return _mock_metrics(metric, from_minutes_ago)
-
 
 def get_logs(service_name: str, from_minutes_ago: int = 30, limit: int = 50) -> dict:
     now = datetime.now(timezone.utc)

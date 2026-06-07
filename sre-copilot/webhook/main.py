@@ -16,11 +16,9 @@ logger = logging.getLogger(__name__)
 
 APPROVAL_URL = os.getenv("APPROVAL_WEBHOOK_URL", "https://spark-366154347729.us-central1.run.app")
 
-
 @app.route("/health")
 def health():
     return jsonify({"status": "ok"})
-
 
 @app.route("/dynatrace/webhook", methods=["POST"])
 def dynatrace_webhook():
@@ -38,7 +36,6 @@ def dynatrace_webhook():
     if not problem_id:
         return jsonify({"status": "error", "reason": "No problem ID"}), 400
 
-    # Fetch session credentials for multi-tenant users
     credentials = None
     if session_id:
         try:
@@ -51,8 +48,6 @@ def dynatrace_webhook():
                     "gl_project_id": session_data.get("gl_project_id"),
                     "approval_url":  APPROVAL_URL,
                 }
-                # Credentials endpoint doesn't return tokens for security;
-                # use env vars for now (the simulate path handles real tokens server-side)
         except Exception as e:
             logger.warning(f"Could not fetch session {session_id}: {e}")
 
@@ -65,7 +60,6 @@ def dynatrace_webhook():
 
     return jsonify({"status": "agent_triggered", "problem_id": problem_id, "session": session_id})
 
-
 def _run_agent(problem_id: str, problem_title: str, credentials: dict = None):
     try:
         import sys
@@ -75,7 +69,6 @@ def _run_agent(problem_id: str, problem_title: str, credentials: dict = None):
         logger.info(f"Agent completed for {problem_id}: {json.dumps(result)[:200]}")
     except Exception as e:
         logger.error(f"Agent failed for {problem_id}: {e}", exc_info=True)
-
 
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8080))

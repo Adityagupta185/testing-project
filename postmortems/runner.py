@@ -1,4 +1,3 @@
-﻿#!/usr/bin/env python3
 """
 MTTR.ai Post-Mortem Test Suite
 Runs the Gemini agent against real-world incident scenarios from
@@ -13,14 +12,12 @@ import os, sys, json, time, argparse, textwrap
 from pathlib import Path
 from datetime import datetime, timezone
 
-# Windows consoles default to cp1252 and choke on ✓/✗/→ — force UTF-8 output.
 try:
     sys.stdout.reconfigure(encoding="utf-8")
     sys.stderr.reconfigure(encoding="utf-8")
 except Exception:
     pass
 
-# -- Load .env from sre-copilot ------------------------------------------------
 env_path = Path(__file__).parent.parent / "sre-copilot" / ".env"
 if env_path.exists():
     for line in env_path.read_text().splitlines():
@@ -38,7 +35,6 @@ client = OpenAI(
 )
 MODEL = "gemini-2.5-flash"
 
-# -- Tool definitions (mirrors agent.py) --------------------------------------
 TOOLS = [
     {"type": "function", "function": {
         "name": "dynatrace_get_problem",
@@ -112,9 +108,6 @@ to a recent deploy — recommend the appropriate operational fix instead.
 Be precise. Distinguish deploy regressions from operational incidents.
 """
 
-
-# -- Tool dispatcher — returns scenario mock data ------------------------------
-
 def dispatch(tool_name: str, tool_input: dict, scenario: dict, calls: list) -> str:
     calls.append(tool_name)
 
@@ -140,7 +133,6 @@ def dispatch(tool_name: str, tool_input: dict, scenario: dict, calls: list) -> s
         })
 
     elif tool_name == "send_approval_request":
-        # Auto-approve in test mode — we want to see if agent triggers rollback
         return json.dumps({
             "decision":    "approved",
             "reason":      "auto-approved (test mode)",
@@ -154,9 +146,6 @@ def dispatch(tool_name: str, tool_input: dict, scenario: dict, calls: list) -> s
         })
 
     return json.dumps({"error": f"unknown tool: {tool_name}"})
-
-
-# -- Agent loop ----------------------------------------------------------------
 
 def run_scenario(scenario: dict) -> dict:
     messages = [
@@ -227,9 +216,6 @@ def run_scenario(scenario: dict) -> dict:
         "duration_seconds":    round(time.time() - start, 1),
     }
 
-
-# -- Scoring -------------------------------------------------------------------
-
 def score(result: dict, scenario: dict) -> dict:
     expected   = scenario["expected"]
     summary    = (result["final_summary"] + " " +
@@ -237,16 +223,13 @@ def score(result: dict, scenario: dict) -> dict:
                   result["approval_payload"].get("recommended_action", "")).lower()
     calls      = result["tool_calls_made"]
 
-    # 1. Root cause keywords found?
     keywords_hit = [k for k in expected["root_cause_keywords"] if k.lower() in summary]
     keyword_score = len(keywords_hit) / len(expected["root_cause_keywords"])
 
-    # 2. Correct rollback decision?
     should_rollback  = expected["should_rollback"]
     did_rollback     = result["triggered_rollback"]
     rollback_correct = (should_rollback == did_rollback)
 
-    # 3. Called all 4 investigation tools?
     investigation_tools = {
         "dynatrace_get_problem", "dynatrace_get_metrics",
         "dynatrace_get_logs", "gitlab_get_recent_deployments"
@@ -254,11 +237,9 @@ def score(result: dict, scenario: dict) -> dict:
     tools_used       = set(calls)
     coverage         = len(investigation_tools & tools_used) / len(investigation_tools)
 
-    # 4. Confidence score reasonable? (should be present and > 0.4)
     confidence = result["approval_payload"].get("confidence_score", 0)
     confidence_ok = 0.4 <= confidence <= 1.0
 
-    # Overall (weighted)
     overall = round(
         keyword_score * 0.40 +
         (1.0 if rollback_correct else 0.0) * 0.35 +
@@ -279,9 +260,6 @@ def score(result: dict, scenario: dict) -> dict:
         "should_rollback":  should_rollback,
         "did_rollback":     did_rollback,
     }
-
-
-# -- Pretty print --------------------------------------------------------------
 
 def bar(score_val: float, width: int = 20) -> str:
     filled = int(score_val * width)
@@ -322,7 +300,6 @@ def print_result(scenario: dict, result: dict, sc: dict) -> None:
     print(f"    Confidence:       {bar(sc['confidence'] if sc['confidence_ok'] else 0)} {sc['confidence']:.0%} {'ok' if sc['confidence_ok'] else 'low'}")
     print(f"\n  OVERALL: {bar(sc['overall'])} {sc['overall']:.0%}  [{rating(sc['overall'])}]")
 
-
 def print_summary(results: list) -> None:
     print("\n" + "=" * 70)
     print("  FINAL RESULTS SUMMARY")
@@ -340,9 +317,6 @@ def print_summary(results: list) -> None:
 
     print(f"\n  Average score: {avg:.0%}   Pass: {passed}  Partial: {partial}  Fail: {failed}")
     print("=" * 70 + "\n")
-
-
-# -- Main ---------------------------------------------------------------------
 
 def main():
     parser = argparse.ArgumentParser(description="MTTR.ai Post-Mortem Test Runner")
@@ -381,7 +355,6 @@ def main():
             print_result(scenario, result, sc)
             all_results.append({"scenario": scenario, "result": result, "score": sc})
 
-            # Save result
             out_dir = Path(__file__).parent / "results"
             out_dir.mkdir(exist_ok=True)
             out_file = out_dir / f"{path.stem}_result.json"
@@ -401,9 +374,5 @@ def main():
     if len(all_results) > 1:
         print_summary(all_results)
 
-
 if __name__ == "__main__":
     main()
-
-
-

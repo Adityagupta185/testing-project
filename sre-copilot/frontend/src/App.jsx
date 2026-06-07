@@ -3,7 +3,6 @@ import { useEffect, useState, useRef, useCallback } from "react";
 const API          = import.meta.env.VITE_API_URL ?? "";
 const WEBHOOK_HOST = "https://sre-webhook-366154347729.us-central1.run.app";
 
-// ── Theme ─────────────────────────────────────────────────────────────────────
 const DARK = {
   bg:         "#08080a",
   surface:    "#111113",
@@ -45,8 +44,6 @@ const LIGHT = {
   toggleBg:   "#e4e4e7",
 };
 
-// ── Shared primitives ─────────────────────────────────────────────────────────
-
 const SEV_LABEL = { AVAILABILITY:"Availability", PERFORMANCE:"Performance", ERROR:"Error", RESOURCE_CONTENTION:"Resource" };
 
 function Badge({ text, t }) {
@@ -84,8 +81,6 @@ function inp(t) {
   };
 }
 
-// ── Siren indicator — pulsing red "ping" like sonar ───────────────────────────
-
 function SirenDot({ size = 8, color = "#dc2626" }) {
   return (
     <span style={{ position:"relative", display:"inline-flex", alignItems:"center", justifyContent:"center", width:size, height:size, flexShrink:0 }}>
@@ -97,8 +92,6 @@ function SirenDot({ size = 8, color = "#dc2626" }) {
     </span>
   );
 }
-
-// ── Logo ──────────────────────────────────────────────────────────────────────
 
 function SparkLogo({ size = 28, showText = true, t }) {
   return (
@@ -112,8 +105,6 @@ function SparkLogo({ size = 28, showText = true, t }) {
     </div>
   );
 }
-
-// ── FireEyeLoader — animated when agent runs ──────────────────────────────────
 
 function FireEyeLoader({ label = "Agent investigating incident..." }) {
   const [frame, setFrame] = useState(0);
@@ -160,8 +151,6 @@ function FireEyeLoader({ label = "Agent investigating incident..." }) {
     </div>
   );
 }
-
-// ── Navbar ────────────────────────────────────────────────────────────────────
 
 function Navbar({ t, dark, toggleDark, onHome, onConnect, session, onDisconnect, activeIncidents }) {
   return (
@@ -222,10 +211,6 @@ function Navbar({ t, dark, toggleDark, onHome, onConnect, session, onDisconnect,
     </nav>
   );
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// PAGE 1: HOME
-// ─────────────────────────────────────────────────────────────────────────────
 
 const STATS = [
   { value:"80%",    label:"avg MTTR reduction"     },
@@ -410,10 +395,6 @@ function HomePage({ t, onConnect, onDemo }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PAGE 2: CONNECT
-// ─────────────────────────────────────────────────────────────────────────────
-
 function ConnectPage({ t, onBack, onConnected }) {
   const [step,        setStep]      = useState(1);
   const [useOAuth,    setUseOAuth]  = useState(false);
@@ -435,10 +416,8 @@ function ConnectPage({ t, onBack, onConnected }) {
   const [loading,     setLoading]   = useState(false);
   const [error,       setError]     = useState("");
 
-  // Step 1 is valid when URL + appropriate auth fields are filled
   const step1Valid = dtUrl && (useOAuth ? (dtClientId && dtClientSec) : dtToken);
 
-  // Is "Add to Slack" OAuth available on this deployment?
   useEffect(() => {
     fetch(`${API}/slack/oauth/config`)
       .then(r => r.json())
@@ -446,7 +425,6 @@ function ConnectPage({ t, onBack, onConnected }) {
       .catch(() => {});
   }, []);
 
-  // Receive the OAuth result from the popup window
   useEffect(() => {
     const appOrigin = API ? new URL(API).origin : window.location.origin;
     const onMsg = (e) => {
@@ -483,7 +461,6 @@ function ConnectPage({ t, onBack, onConnected }) {
     setSlState(""); setSlTeam(""); setSlChannels(null); setSlChannel("");
   };
 
-  // Show manual token entry when OAuth is unavailable or the user opts into it
   const showManualSlack = !oauthEnabled || manualSlack;
 
   const goStep2 = () => {
@@ -507,7 +484,6 @@ function ConnectPage({ t, onBack, onConnected }) {
     const oauthState  = skip ? "" : (usingOAuth ? slState : "");
     const slCh        = skip ? "" : slChannel.trim();
 
-    // Slack is optional, but once a workspace/token is set a channel is required.
     if (!skip && (slBot || oauthState) && !slCh) {
       setError("Pick a Slack channel for incident alerts");
       return;
@@ -791,10 +767,6 @@ function ConnectPage({ t, onBack, onConnected }) {
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// PAGE 3: DASHBOARD
-// ─────────────────────────────────────────────────────────────────────────────
-
 function AgentStepsCard({ incident, t }) {
   const startRef = useRef(incident.created_at ? new Date(incident.created_at) : new Date());
   const [elapsed, setElapsed] = useState(0);
@@ -1011,8 +983,6 @@ function DoneOverlay({ incident, t, onClose }) {
   );
 }
 
-// ── Waiting dots animation ─────────────────────────────────────────────────
-
 function WaitingDots() {
   return (
     <span style={{ display:"inline-flex", gap:3, alignItems:"center", marginLeft:4 }}>
@@ -1026,8 +996,6 @@ function WaitingDots() {
     </span>
   );
 }
-
-// ── Flow step tracker ──────────────────────────────────────────────────────
 
 function FlowTracker({ steps, t }) {
   return (
@@ -1059,8 +1027,6 @@ function FlowTracker({ steps, t }) {
   );
 }
 
-// ── IncidentCard — full state machine ─────────────────────────────────────
-
 function IncidentCard({ incident, onDecide, t }) {
   const [loading, setLoading] = useState(false);
   const [reason,  setReason]  = useState("");
@@ -1084,7 +1050,6 @@ function IncidentCard({ incident, onDecide, t }) {
     setLoading(false); onDecide();
   };
 
-  // Flow steps
   const flowSteps = [
     { label:"Detected",    done: true },
     { label:"Diagnosed",   done: true },
@@ -1367,10 +1332,6 @@ function DashboardPage({ t, session, incidents, onSimulate, simulating, doneInc,
   );
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// ROOT APP — with URL routing
-// ─────────────────────────────────────────────────────────────────────────────
-
 export default function App() {
   const [dark,       setDark]       = useState(true);
   const [page,       setPage]       = useState("home");   // "home" | "connect" | "dashboard"
@@ -1383,7 +1344,6 @@ export default function App() {
 
   const t = dark ? DARK : LIGHT;
 
-  // navigate: updates both React state and URL
   const navigate = useCallback((p) => {
     const urls = { home:"/", connect:"/connect", dashboard:"/dashboard" };
     const target = urls[p] || "/";
@@ -1412,7 +1372,6 @@ export default function App() {
     }
   }, []);
 
-  // Initialise page from URL (runs once on mount)
   useEffect(() => {
     if (didInit.current) return;
     didInit.current = true;
@@ -1436,7 +1395,6 @@ export default function App() {
 
     const init = async () => {
       if (path === "/demo") {
-        // /demo always starts a fresh sandbox session
         await startDemo();
       } else if (path === "/dashboard") {
         const hasSession = await restoreSession();
@@ -1449,19 +1407,16 @@ export default function App() {
       } else if (path === "/connect") {
         setPage("connect");
       } else {
-        // "/" — try silent session restore, go to dashboard if found
         const hasSession = await restoreSession();
         if (hasSession) {
           window.history.replaceState({ page:"dashboard" }, "", "/dashboard");
           setPage("dashboard");
         }
-        // else stay on home
       }
     };
     init();
   }, [startDemo]);
 
-  // Keep URL in sync whenever page changes (after init)
   useEffect(() => {
     if (!didInit.current) return;
     const urls = { home:"/", connect:"/connect", dashboard:"/dashboard" };
@@ -1471,7 +1426,6 @@ export default function App() {
     }
   }, [page]);
 
-  // Handle browser back / forward
   useEffect(() => {
     const onPop = (e) => {
       const p = window.location.pathname;
@@ -1525,7 +1479,6 @@ export default function App() {
     try {
       const r = await fetch(`${API}/sessions/${session.session_id}/simulate`, { method:"POST" });
       if (r.status === 404) {
-        // Session expired — recreate demo session and retry
         const nr = await fetch(`${API}/demo`, { method:"POST" });
         if (!nr.ok) return;
         const newSession = await nr.json();
@@ -1536,7 +1489,6 @@ export default function App() {
     } finally { setSimulating(false); }
   };
 
-  // Count active incidents for the siren badge
   const activeIncidentCount = incidents.filter(
     i => i.decision == null && i.status !== "rejected" && i.status !== "resolved"
   ).length;

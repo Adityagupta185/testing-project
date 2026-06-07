@@ -16,27 +16,19 @@ from datetime import datetime, timezone
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# ── Config ────────────────────────────────────────────────────────────────────
 GCP_PROJECT          = os.environ.get("GCP_PROJECT_ID", "eco-splicer-475211-i6")
 GCP_REGION           = os.environ.get("REGION", "us-central1")
 GITLAB_TOKEN         = os.environ.get("GITLAB_TOKEN", "")
 GITLAB_PROJECT_ID    = os.environ.get("GITLAB_PROJECT_ID", "")
 APPROVAL_WEBHOOK_URL = os.environ.get("APPROVAL_WEBHOOK_URL", "")
 
-# Route Gemini calls through Vertex AI (Google Cloud Agent Builder backend)
 os.environ["GOOGLE_GENAI_USE_VERTEXAI"] = "1"
 os.environ["GOOGLE_CLOUD_PROJECT"]      = GCP_PROJECT
 
-# ── Google ADK imports ────────────────────────────────────────────────────────
 from google.adk.agents import Agent
 from google.adk.runners import Runner
 from google.adk.sessions import InMemorySessionService
 from google.genai import types
-
-
-# ── Tool functions ────────────────────────────────────────────────────────────
-# ADK reads Python type annotations + docstrings to build the tool schema
-# automatically — no manual JSON schema required.
 
 def dynatrace_get_problem(problem_id: str) -> dict:
     """Fetch full Dynatrace problem details via MCP: affected entities, severity, start time, and evidence."""
@@ -45,14 +37,12 @@ def dynatrace_get_problem(problem_id: str) -> dict:
     logger.info(f"[tool] dynatrace_get_problem({problem_id})")
     return result
 
-
 def dynatrace_get_metrics(entity_id: str, metric: str, from_minutes_ago: int = 60) -> dict:
     """Pull time-series metrics (CPU, memory, latency) for an entity via Dynatrace MCP query_metrics."""
     from tools.dynatrace_mcp import get_metrics
     result = get_metrics(entity_id, metric, from_minutes_ago)
     logger.info(f"[tool] dynatrace_get_metrics({entity_id}, {metric})")
     return result
-
 
 def dynatrace_get_logs(service_name: str, from_minutes_ago: int = 30, limit: int = 50) -> dict:
     """Fetch recent log lines for a named service via Dynatrace MCP search_logs."""
@@ -61,7 +51,6 @@ def dynatrace_get_logs(service_name: str, from_minutes_ago: int = 30, limit: int
     logger.info(f"[tool] dynatrace_get_logs({service_name})")
     return result
 
-
 def gitlab_get_recent_deployments(project_id: str, hours_back: int = 3) -> dict:
     """List recent GitLab CI/CD pipeline runs to surface deployments that may have caused the incident."""
     from tools.gitlab_client import GitLabClient
@@ -69,14 +58,12 @@ def gitlab_get_recent_deployments(project_id: str, hours_back: int = 3) -> dict:
     logger.info(f"[tool] gitlab_get_recent_deployments({project_id}) → {result.get('deployment_count', 0)} pipelines")
     return result
 
-
 def gitlab_trigger_rollback(project_id: str, rollback_to_version: str) -> dict:
     """Trigger the GitLab rollback pipeline to revert the service to a previous stable version."""
     from tools.gitlab_client import GitLabClient
     result = GitLabClient(GITLAB_TOKEN).trigger_rollback(project_id, rollback_to_version)
     logger.info(f"[tool] gitlab_trigger_rollback({project_id}, {rollback_to_version})")
     return result
-
 
 def send_approval_request(
     summary: str,
@@ -97,9 +84,6 @@ def send_approval_request(
     logger.info(f"[tool] send_approval_request → decision: {result.get('decision')}")
     return result
 
-
-# ── System prompt ─────────────────────────────────────────────────────────────
-
 SYSTEM_PROMPT = """You are SRE Copilot, an expert incident response agent powered by Gemini on Google Cloud.
 
 When an alert fires:
@@ -115,8 +99,6 @@ When an alert fires:
 
 Be precise. State what you know vs what you infer. Never trigger a rollback without approval.
 """
-
-# ── Google ADK Agent (Google Cloud Agent Builder) ─────────────────────────────
 
 _sre_agent = Agent(
     name="sre_copilot",
@@ -143,14 +125,10 @@ _runner = Runner(
     session_service=_session_service,
 )
 
-
-# ── Public entry point (called by webhook/main.py) ────────────────────────────
-
 def investigate_incident(problem_id: str, problem_title: str, credentials: dict = None) -> dict:
     """Run a full investigation for a Dynatrace alert. credentials overrides env vars for multi-tenant users."""
     logger.info(f"SPARK (Google ADK + Gemini 2.5 Flash on Vertex AI) activated: {problem_id} — {problem_title}")
 
-    # Per-session credential overrides for multi-tenant public users
     if credentials:
         global APPROVAL_WEBHOOK_URL, GITLAB_PROJECT_ID
         if credentials.get("dt_url"):
@@ -188,7 +166,6 @@ def investigate_incident(problem_id: str, problem_title: str, credentials: dict 
 
     logger.info(f"Investigation complete: {problem_id}")
     return {"summary": final_text, "problem_id": problem_id}
-
 
 if __name__ == "__main__":
     result = investigate_incident(

@@ -9,7 +9,7 @@ import sys
 import json
 import requests
 
-DT_URL = os.environ.get("DYNATRACE_URL", "")
+DT_URL = os.environ.get("DYNATRACE_URL", "https://ker44664.apps.dynatrace.com")
 DT_TOKEN = os.environ.get("DYNATRACE_TOKEN", "")
 WEBHOOK_URL = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("WEBHOOK_URL", "")
 

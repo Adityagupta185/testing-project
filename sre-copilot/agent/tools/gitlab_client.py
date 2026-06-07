@@ -3,7 +3,6 @@
 import requests
 from datetime import datetime, timezone, timedelta
 
-
 class GitLabClient:
     def __init__(self, token: str, base_url: str = "https://gitlab.com"):
         self.base_url = base_url.rstrip("/")
@@ -32,7 +31,6 @@ class GitLabClient:
                 "per_page": 10
             })
         except Exception as e:
-            # Don't let a GitLab hiccup crash the whole investigation
             return {"project_id": project_id, "hours_back": hours_back,
                     "deployment_count": 0, "deployments": [], "error": str(e)[:200]}
         deployments = []
@@ -71,8 +69,6 @@ class GitLabClient:
                 "rollback_to": rollback_to_version
             }
         except Exception as e:
-            # The rollback job is `when: manual` in .gitlab-ci.yml by design —
-            # surface that to the agent instead of crashing the run.
             return {
                 "triggered": False,
                 "rollback_to": rollback_to_version,
