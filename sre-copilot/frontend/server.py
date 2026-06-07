@@ -907,14 +907,16 @@ APP_URL = os.getenv("APP_URL", "https://spark-366154347729.us-central1.run.app")
 
 def _oauth_popup_html(state=None, team=None, error=None):
     import json as _j
-    msg = _j.dumps({"type": "spark_slack_oauth", "state": state, "team": team, "error": error})
-    note = (f"✅ Connected to {team}" if not error else f"❌ {error}")
+    import html as _h
+    msg       = _j.dumps({"type": "spark_slack_oauth", "state": state, "team": team, "error": error})
+    target    = _j.dumps(APP_URL)  # pin postMessage to our origin, never "*"
+    safe_note = _h.escape(f"✅ Connected to {team}" if not error else f"❌ {error}")
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>Slack</title></head>
 <body style="background:#08080a;color:#f0f0f2;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0">
 <div style="text-align:center"><div style="font-size:40px">{'💬' if not error else '⚠️'}</div>
-<p>{note}. You can close this window.</p></div>
+<p>{safe_note}. You can close this window.</p></div>
 <script>
-  try {{ if (window.opener) window.opener.postMessage({msg}, "*"); }} catch (e) {{}}
+  try {{ if (window.opener) window.opener.postMessage({msg}, {target}); }} catch (e) {{}}
   setTimeout(function () {{ window.close(); }}, 900);
 </script></body></html>"""
 

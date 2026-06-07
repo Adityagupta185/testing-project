@@ -448,7 +448,9 @@ function ConnectPage({ t, onBack, onConnected }) {
 
   // Receive the OAuth result from the popup window
   useEffect(() => {
+    const appOrigin = API ? new URL(API).origin : window.location.origin;
     const onMsg = (e) => {
+      if (e.origin !== appOrigin) return;   // only trust messages from our own origin
       const d = e.data;
       if (!d || d.type !== "spark_slack_oauth") return;
       if (d.error) { setError(`Slack: ${d.error}`); return; }
