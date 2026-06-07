@@ -424,6 +424,8 @@ function ConnectPage({ t, onBack, onConnected }) {
   const [glUrl,       setGlUrl]     = useState("https://gitlab.com");
   const [glProject,   setGlProject] = useState("");
   const [glToken,     setGlToken]   = useState("");
+  const [slToken,     setSlToken]   = useState("");
+  const [slChannel,   setSlChannel] = useState("");
   const [loading,     setLoading]   = useState(false);
   const [error,       setError]     = useState("");
 
@@ -440,12 +442,27 @@ function ConnectPage({ t, onBack, onConnected }) {
     setError(""); setStep(2);
   };
 
-  const connect = async () => {
+  const goStep3 = () => {
+    if (!glToken) { setError("GitLab token is required"); return; }
+    setError(""); setStep(3);
+  };
+
+  const connect = async (slBot = slToken, slCh = slChannel) => {
+    // Slack is optional, but if a token is entered a channel is required.
+    if (slBot.trim() && !slCh.trim()) {
+      setError("Enter the Slack channel ID, or skip Slack for now");
+      return;
+    }
     setLoading(true); setError("");
     try {
-      const body = useOAuth
-        ? { dt_url:dtUrl.trim(), dt_client_id:dtClientId.trim(), dt_client_secret:dtClientSec.trim(), gl_url:glUrl.trim(), gl_token:glToken.trim(), gl_project_id:glProject.trim() }
-        : { dt_url:dtUrl.trim(), dt_token:dtToken.trim(), gl_url:glUrl.trim(), gl_token:glToken.trim(), gl_project_id:glProject.trim() };
+      const dtPart = useOAuth
+        ? { dt_url:dtUrl.trim(), dt_client_id:dtClientId.trim(), dt_client_secret:dtClientSec.trim() }
+        : { dt_url:dtUrl.trim(), dt_token:dtToken.trim() };
+      const body = {
+        ...dtPart,
+        gl_url:glUrl.trim(), gl_token:glToken.trim(), gl_project_id:glProject.trim(),
+        slack_bot_token:slBot.trim(), slack_channel_id:slCh.trim(),
+      };
       const r = await fetch(`${API}/connect`, {
         method:"POST",
         headers:{ "Content-Type":"application/json" },
@@ -486,16 +503,16 @@ function ConnectPage({ t, onBack, onConnected }) {
         }}>
           {/* Progress */}
           <div style={{ display:"flex", gap:6, marginBottom:28 }}>
-            {[1,2].map(n => (
+            {[1,2,3].map(n => (
               <div key={n} style={{ flex:1, height:3, borderRadius:99, background: n <= step ? t.accent : t.border, transition:"background 0.3s" }} />
             ))}
           </div>
 
           <div style={{ fontSize:11, color:t.textSub, fontWeight:700, textTransform:"uppercase", letterSpacing:"0.08em", marginBottom:6 }}>
-            Step {step} of 2
+            Step {step} of 3
           </div>
           <h2 style={{ margin:"0 0 24px", fontSize:20, fontWeight:800, letterSpacing:"-0.02em" }}>
-            {step === 1 ? "Connect Dynatrace" : "Connect GitLab"}
+            {step === 1 ? "Connect Dynatrace" : step === 2 ? "Connect GitLab" : "Connect Slack"}
           </h2>
 
           {step === 1 ? (
@@ -551,7 +568,7 @@ function ConnectPage({ t, onBack, onConnected }) {
                 </>
               )}
             </>
-          ) : (
+          ) : step === 2 ? (
             <>
               <label style={{ display:"block", marginBottom:14 }}>
                 <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>GitLab URL</div>
@@ -574,6 +591,39 @@ function ConnectPage({ t, onBack, onConnected }) {
                 <code style={{ background:t.codeBg, padding:"1px 5px", borderRadius:3 }}>api</code>
               </div>
             </>
+          ) : (
+            <>
+              <div style={{
+                background:"rgba(96,165,250,0.08)", border:"1px solid rgba(96,165,250,0.22)",
+                borderRadius:10, padding:"12px 14px", marginBottom:18,
+                display:"flex", gap:10, alignItems:"flex-start",
+              }}>
+                <span style={{ fontSize:18, flexShrink:0 }}>💬</span>
+                <div style={{ fontSize:12, color:t.textSub, lineHeight:1.6 }}>
+                  Get incident approvals pushed to <strong style={{ color:t.text }}>your own</strong> Slack.
+                  Tap Approve or Reject right from the channel — the rollback runs automatically.
+                  <span style={{ color:t.textMuted }}> Optional — you can skip and add it later.</span>
+                </div>
+              </div>
+
+              <label style={{ display:"block", marginBottom:14 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Bot User OAuth Token</div>
+                <input value={slToken} onChange={e => setSlToken(e.target.value)}
+                  placeholder="xoxb-..." type="password" style={inp(t)} />
+              </label>
+              <label style={{ display:"block", marginBottom:8 }}>
+                <div style={{ fontSize:12, fontWeight:600, color:t.textSub, marginBottom:6 }}>Channel ID</div>
+                <input value={slChannel} onChange={e => setSlChannel(e.target.value)}
+                  placeholder="e.g. C0123ABCDEF" style={inp(t)} />
+              </label>
+              <div style={{ fontSize:11, color:t.textMuted, marginBottom:24, lineHeight:1.7 }}>
+                api.slack.com/apps → your app → OAuth &amp; Permissions → bot scopes{" "}
+                {["chat:write"].map(s => (
+                  <code key={s} style={{ background:t.codeBg, border:`1px solid ${t.border}`, padding:"1px 5px", borderRadius:3, marginRight:4, fontSize:11 }}>{s}</code>
+                ))}
+                · invite the bot to the channel, then copy the channel ID from its “View channel details”.
+              </div>
+            </>
           )}
 
           {error && (
@@ -588,24 +638,37 @@ function ConnectPage({ t, onBack, onConnected }) {
 
           <div style={{ display:"flex", gap:10 }}>
             <button
-              onClick={step === 1 ? onBack : () => { setError(""); setStep(1); }}
+              onClick={step === 1 ? onBack : () => { setError(""); setStep(step - 1); }}
               style={{ background:"transparent", color:t.textSub, border:`1px solid ${t.border}`, borderRadius:8, padding:"11px 18px", fontSize:14, cursor:"pointer" }}
             >
               {step === 1 ? "Cancel" : "← Back"}
             </button>
             <button
-              onClick={step === 1 ? goStep2 : connect}
-              disabled={loading || (step === 1 ? !step1Valid : !glToken)}
+              onClick={step === 1 ? goStep2 : step === 2 ? goStep3 : () => connect()}
+              disabled={loading || (step === 1 ? !step1Valid : step === 2 ? !glToken : false)}
               style={{
                 flex:1, background:t.accent, color:"#fff", border:"none", borderRadius:8,
                 padding:"11px 0", fontSize:14, fontWeight:700,
-                cursor:(loading || (step === 1 ? !step1Valid : !glToken)) ? "not-allowed" : "pointer",
+                cursor:(loading || (step === 1 ? !step1Valid : step === 2 ? !glToken : false)) ? "not-allowed" : "pointer",
                 opacity: loading ? 0.7 : 1,
               }}
             >
-              {loading ? "Connecting..." : step === 1 ? "Next → GitLab" : "Connect & Continue →"}
+              {loading ? "Connecting..." : step === 1 ? "Next → GitLab" : step === 2 ? "Next → Slack" : "Finish & Connect →"}
             </button>
           </div>
+
+          {/* Skip Slack — only on the optional final step */}
+          {step === 3 && !loading && (
+            <button
+              onClick={() => connect("", "")}
+              style={{
+                width:"100%", marginTop:12, background:"transparent", color:t.textSub,
+                border:"none", fontSize:13, cursor:"pointer", textDecoration:"underline",
+              }}
+            >
+              Skip Slack for now →
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -1090,6 +1153,11 @@ function DashboardPage({ t, session, incidents, onSimulate, simulating, doneInc,
           {session.services_count > 0 && <span style={{ fontSize:12, color:t.textSub }}>· {session.services_count} services monitored</span>}
           {session.project_name && <span style={{ fontSize:12, color:t.textSub }}>· {session.project_name}</span>}
           <span style={{ fontSize:12, color:t.textSub }}>· @{session.gl_username}</span>
+          {session.slack_connected && (
+            <span style={{ fontSize:12, color:t.textSub, display:"inline-flex", alignItems:"center", gap:4 }}>
+              · 💬 Slack{session.slack_team ? ` · ${session.slack_team}` : ""}
+            </span>
+          )}
 
           <div style={{ marginLeft:"auto", display:"flex", gap:8, alignItems:"center" }}>
             {/* Siren indicator when there are active incidents */}

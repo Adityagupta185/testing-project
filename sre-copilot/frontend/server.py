@@ -183,29 +183,60 @@ def connect():
         except Exception:
             pass
 
+    # Validate Slack (optional — step 3 of the connect wizard).
+    # When the user provides a bot token we verify it and require a channel so
+    # this session gets its OWN incident notifications instead of the shared one.
+    sl_bot_token = (data.get("slack_bot_token") or "").strip()
+    sl_channel   = (data.get("slack_channel_id") or "").strip()
+    slack_connected = False
+    slack_team      = None
+    slack_bot_user  = None
+    if sl_bot_token:
+        if not sl_channel:
+            return jsonify({"error": "Slack channel ID is required when connecting Slack"}), 400
+        try:
+            auth = requests.post(
+                "https://slack.com/api/auth.test",
+                headers={"Authorization": f"Bearer {sl_bot_token}"}, timeout=8,
+            ).json()
+        except Exception as e:
+            return jsonify({"error": f"Slack connection failed: {e}"}), 400
+        if not auth.get("ok"):
+            return jsonify({"error": f"Slack auth failed: {auth.get('error')}. Check the bot token."}), 400
+        slack_connected = True
+        slack_team      = auth.get("team")
+        slack_bot_user  = auth.get("user")
+
     session_id = str(uuid.uuid4())
     sessions[session_id] = {
-        "dt_url":         dt_url,
-        "dt_token":       stored_token,
-        "gl_url":         gl_url,
-        "gl_token":       gl_token,
-        "gl_project_id":  gl_project,
-        "env_name":       env_name,
-        "services_count": services_count,
-        "services":       services,
-        "gl_username":    gl_username,
-        "project_name":   project_name,
-        "created_at":     datetime.now(timezone.utc).isoformat(),
+        "dt_url":            dt_url,
+        "dt_token":          stored_token,
+        "gl_url":            gl_url,
+        "gl_token":          gl_token,
+        "gl_project_id":     gl_project,
+        "env_name":          env_name,
+        "services_count":    services_count,
+        "services":          services,
+        "gl_username":       gl_username,
+        "project_name":      project_name,
+        "slack_bot_token":   sl_bot_token,
+        "slack_channel_id":  sl_channel,
+        "slack_connected":   slack_connected,
+        "slack_team":        slack_team,
+        "created_at":        datetime.now(timezone.utc).isoformat(),
     }
 
     return jsonify({
-        "session_id":     session_id,
-        "env_name":       env_name,
-        "services_count": services_count,
-        "services":       services,
-        "gl_username":    gl_username,
-        "project_name":   project_name,
-        "webhook_url":    f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
+        "session_id":      session_id,
+        "env_name":        env_name,
+        "services_count":  services_count,
+        "services":        services,
+        "gl_username":     gl_username,
+        "project_name":    project_name,
+        "slack_connected": slack_connected,
+        "slack_team":      slack_team,
+        "slack_bot_user":  slack_bot_user,
+        "webhook_url":     f"{WEBHOOK_URL}/dynatrace/webhook?session={session_id}",
     })
 
 
@@ -243,7 +274,7 @@ def get_session(session_id):
     s = sessions.get(session_id)
     if not s:
         return jsonify({"error": "Not found"}), 404
-    return jsonify({k: v for k, v in s.items() if k not in ("dt_token", "gl_token")})
+    return jsonify({k: v for k, v in s.items() if k not in ("dt_token", "gl_token", "slack_bot_token")})
 
 
 # ─── Incidents ────────────────────────────────────────────────────────────────
@@ -491,10 +522,22 @@ def _execute_rollback(incident_id: str, session: dict):
 
 # ─── Slack approval notifications ────────────────────────────────────────────
 
+def _session_slack(incident_id: str):
+    """Resolve the Slack bot token + channel for an incident.
+    Prefers the per-session credentials the user connected at /connect (step 3),
+    falling back to the shared SLACK_BOT_TOKEN / SLACK_CHANNEL_ID env vars."""
+    inc = incidents.get(incident_id) or {}
+    session = sessions.get(inc.get("session_id")) or {}
+    bot_token = session.get("slack_bot_token") or SLACK_BOT_TOKEN
+    channel   = session.get("slack_channel_id") or SLACK_CHANNEL_ID
+    return bot_token, channel
+
+
 def _notify_slack(incident_id: str):
     """Post a Slack Block Kit approval card when an incident needs a decision."""
-    if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
-        logger.warning("Slack not configured — SLACK_BOT_TOKEN or SLACK_CHANNEL_ID missing")
+    bot_token, channel_cfg = _session_slack(incident_id)
+    if not bot_token or not channel_cfg:
+        logger.warning("Slack not configured for this session — no bot token or channel")
         return
     inc = incidents.get(incident_id)
     if not inc:
@@ -549,16 +592,16 @@ def _notify_slack(incident_id: str):
         },
     ]
 
-    headers = {"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"}
-    channel = SLACK_CHANNEL_ID
+    headers = {"Authorization": f"Bearer {bot_token}", "Content-Type": "application/json"}
+    channel = channel_cfg
 
     try:
         # For DM channels (D...) ensure the conversation is open first
-        if SLACK_CHANNEL_ID.startswith("D"):
+        if channel_cfg.startswith("D"):
             open_r = requests.post(
                 "https://slack.com/api/conversations.open",
                 headers=headers,
-                json={"channel": SLACK_CHANNEL_ID},
+                json={"channel": channel_cfg},
                 timeout=8,
             )
             open_data = open_r.json()
@@ -589,7 +632,8 @@ def _notify_slack(incident_id: str):
 
 def _update_slack_message(incident_id: str, decision: str, engineer: str):
     """Replace the approval buttons with a resolved status message."""
-    if not SLACK_BOT_TOKEN or not SLACK_CHANNEL_ID:
+    bot_token, channel_cfg = _session_slack(incident_id)
+    if not bot_token or not channel_cfg:
         return
     inc = incidents.get(incident_id)
     if not inc or not inc.get("slack_ts"):
@@ -599,8 +643,8 @@ def _update_slack_message(incident_id: str, decision: str, engineer: str):
     try:
         requests.post(
             "https://slack.com/api/chat.update",
-            headers={"Authorization": f"Bearer {SLACK_BOT_TOKEN}", "Content-Type": "application/json"},
-            json={"channel": SLACK_CHANNEL_ID, "ts": inc["slack_ts"], "text": text, "blocks": [
+            headers={"Authorization": f"Bearer {bot_token}", "Content-Type": "application/json"},
+            json={"channel": channel_cfg, "ts": inc["slack_ts"], "text": text, "blocks": [
                 {"type": "section", "text": {"type": "mrkdwn", "text": text}},
             ]},
             timeout=8,
@@ -757,6 +801,17 @@ def serve_spa(path):
     if path and os.path.exists(target):
         return send_from_directory(STATIC_DIR, path)
     return send_from_directory(STATIC_DIR, "index.html")
+
+
+@app.errorhandler(404)
+@app.errorhandler(405)
+def spa_fallback(e):
+    """SPA client-side routes (/connect, /dashboard, /demo) share names with the
+    POST API routes, so a browser GET/refresh on them would otherwise 404/405.
+    Serve the app shell for HTML navigations; keep JSON errors for API clients."""
+    if request.method == "GET" and "text/html" in request.headers.get("Accept", ""):
+        return send_from_directory(STATIC_DIR, "index.html")
+    return jsonify({"error": "Not found"}), getattr(e, "code", 404)
 
 
 if __name__ == "__main__":
