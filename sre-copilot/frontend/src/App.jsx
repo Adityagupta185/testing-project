@@ -96,10 +96,10 @@ function SirenDot({ size = 8, color = "#dc2626" }) {
 function SparkLogo({ size = 28, showText = true, t }) {
   return (
     <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-      <img src="/logo.png" alt="SPARK" style={{ width:size, height:size, objectFit:"contain" }} />
+      <img src="/logo.png" alt="spark" style={{ width:size, height:size, objectFit:"contain" }} />
       {showText && (
         <span style={{ fontWeight:900, fontSize:size * 0.78, letterSpacing:"-0.04em", color:t.text }}>
-          SPARK
+          spark
         </span>
       )}
     </div>
@@ -127,7 +127,7 @@ function FireEyeLoader({ label = "Agent investigating incident..." }) {
         <div style={{ position:"relative", width:"100%", height:"100%", background:"transparent" }}>
           <img
             src="/fireineye.svg"
-            alt="SPARK agent"
+            alt="spark agent"
             style={{
               width:"100%", height:"100%", objectFit:"contain",
               animation:"fireFlicker 1.1s ease-in-out infinite alternate",
@@ -221,7 +221,7 @@ const STATS = [
 const FLOW = [
   { icon:"🔔", label:"Dynatrace Alert" },
   { icon:"🧠", label:"Gemini Diagnoses" },
-  { icon:"🔥", label:"SPARK Alerts You" },
+  { icon:"🔥", label:"spark alerts you" },
   { icon:"👤", label:"You Approve"     },
   { icon:"⚡", label:"Auto Rollback"   },
   { icon:"✅", label:"Resolved"        },
@@ -251,7 +251,7 @@ function HomePage({ t, onConnect, onDemo }) {
           <div style={{ position:"relative" }}>
             <img
               src="/logo.png"
-              alt="SPARK"
+              alt="spark"
               style={{ width:96, height:96, objectFit:"contain", animation:"heroFlame 2s ease-in-out infinite alternate" }}
             />
             <div style={{
@@ -267,7 +267,7 @@ function HomePage({ t, onConnect, onDemo }) {
           fontSize:"clamp(40px, 6.5vw, 72px)", fontWeight:900,
           letterSpacing:"-0.045em", lineHeight:1.05, margin:"0 0 8px",
         }}>
-          <span style={{ color:t.accent }}>SPARK</span>
+          <span style={{ color:t.accent }}>spark</span>
         </h1>
         <h2 style={{
           fontSize:"clamp(20px, 3vw, 32px)", fontWeight:700,
@@ -281,7 +281,7 @@ function HomePage({ t, onConnect, onDemo }) {
           fontSize:"clamp(15px, 1.8vw, 18px)", color:t.textSub,
           maxWidth:520, margin:"0 auto 40px", lineHeight:1.75,
         }}>
-          SPARK connects to Dynatrace, diagnoses incidents with Gemini AI, and
+          spark connects to Dynatrace, diagnoses incidents with Gemini AI, and
           coordinates rollbacks via GitLab — with your one-tap approval always in the loop.
         </p>
 
@@ -368,7 +368,7 @@ function HomePage({ t, onConnect, onDemo }) {
           <div>
             <div style={{ fontSize:13, fontWeight:700, marginBottom:4 }}>Approve from Slack</div>
             <div style={{ fontSize:13, color:t.textSub, lineHeight:1.65 }}>
-              When SPARK diagnoses an incident, your Slack buzzes. One tap — approve or reject.
+              When spark diagnoses an incident, your Slack buzzes. One tap — approve or reject.
               Rollback executes automatically.
             </div>
           </div>
@@ -386,7 +386,7 @@ function HomePage({ t, onConnect, onDemo }) {
           <div style={{ fontSize:13, color:t.text, lineHeight:1.75 }}>
             Tested against Cloudflare, PagerDuty, rust-lang, Foursquare.
             Human engineers took <strong>15 min – 17 hours</strong>.
-            SPARK: <strong style={{ color:"#16a34a" }}>80% average accuracy</strong>.
+            spark: <strong style={{ color:"#16a34a" }}>80% average accuracy</strong>.
             Foursquare MongoDB OOM — agent correctly said <em>don't rollback, fix the index</em>.
           </div>
         </div>
@@ -527,8 +527,8 @@ function ConnectPage({ t, onBack, onConnected }) {
       <div style={{ width:"100%", maxWidth:440 }}>
         {/* Logo */}
         <div style={{ textAlign:"center", marginBottom:32 }}>
-          <img src="/logo.png" alt="SPARK" style={{ width:48, height:48, objectFit:"contain", marginBottom:8 }} />
-          <div style={{ fontWeight:900, fontSize:22, letterSpacing:"-0.04em" }}>SPARK</div>
+          <img src="/logo.png" alt="spark" style={{ width:48, height:48, objectFit:"contain", marginBottom:8 }} />
+          <div style={{ fontWeight:900, fontSize:22, letterSpacing:"-0.04em" }}>spark</div>
         </div>
 
         {/* Card */}
@@ -681,8 +681,8 @@ function ConnectPage({ t, onBack, onConnected }) {
                   </label>
                   <div style={{ fontSize:11, color:t.textMuted, marginBottom:24, lineHeight:1.7 }}>
                     {slChannels && slChannels.length === 0
-                      ? "No channels found — invite the SPARK bot to a channel, then reconnect."
-                      : "Don’t see your channel? Invite the SPARK bot to it, then reconnect."}{" "}
+                      ? "No channels found — invite the spark bot to a channel, then reconnect."
+                      : "Don’t see your channel? Invite the spark bot to it, then reconnect."}{" "}
                     <button onClick={resetSlackOAuth} style={{ background:"none", border:"none", color:t.accent, cursor:"pointer", fontSize:11, padding:0, textDecoration:"underline" }}>
                       Reconnect
                     </button>
@@ -866,7 +866,7 @@ function DoneOverlay({ incident, t, onClose }) {
         {/* Header */}
         <div style={{ textAlign:"center", marginBottom:28 }}>
           <div style={{ position:"relative", display:"inline-block", marginBottom:16 }}>
-            <img src="/logo.png" alt="SPARK"
+            <img src="/logo.png" alt="spark"
               style={{ width:80, height:80, objectFit:"contain", animation:"popIn 0.5s cubic-bezier(0.175,0.885,0.32,1.275)" }} />
             <div style={{ position:"absolute", inset:-16, background:"radial-gradient(circle, rgba(249,115,22,0.3) 0%, transparent 70%)", pointerEvents:"none" }} />
           </div>
@@ -890,7 +890,7 @@ function DoneOverlay({ incident, t, onClose }) {
             </div>
             <div style={{ display:"flex", alignItems:"center", color:t.textMuted, fontSize:18 }}>vs</div>
             <div style={{ flex:1, background:t.approveBg, border:`1px solid ${t.approve}44`, borderRadius:12, padding:"14px 18px", textAlign:"center" }}>
-              <div style={{ fontSize:10, color:t.textMuted, textTransform:"uppercase", letterSpacing:"0.07em", marginBottom:4 }}>SPARK</div>
+              <div style={{ fontSize:10, color:t.textMuted, letterSpacing:"0.07em", marginBottom:4 }}>spark</div>
               <div style={{ fontSize:26, fontWeight:900, color:"#16a34a" }}>{secs}s</div>
             </div>
           </div>
@@ -1287,7 +1287,7 @@ function DashboardPage({ t, session, incidents, onSimulate, simulating, doneInc,
               background:t.surface, border:`2px dashed ${t.border}`,
               borderRadius:14, padding:"40px 24px", textAlign:"center",
             }}>
-              <img src="/logo.png" alt="SPARK" style={{ width:56, height:56, objectFit:"contain", marginBottom:12, opacity:0.6 }} />
+              <img src="/logo.png" alt="spark" style={{ width:56, height:56, objectFit:"contain", marginBottom:12, opacity:0.6 }} />
               <p style={{ fontSize:15, fontWeight:700, margin:"0 0 6px", color:t.text }}>No active incidents</p>
               <p style={{ fontSize:13, color:t.textSub, margin:"0 0 20px" }}>
                 Simulate a memory-leak incident to see the full agent flow in ~30 seconds.
